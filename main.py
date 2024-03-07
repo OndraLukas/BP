@@ -150,6 +150,7 @@ class TileManager:
     def set_selected_armies(self, number):
         self.selected_armies = number
 
+
     def reset_armies(self, player_index):
         if self.active_tile != None:
             self.active_tile.add_armies(player_index, self.selected_armies)
@@ -215,6 +216,7 @@ class Game:
         self.active_player = 0
         self.tiles = []
         self.active_cards = []
+        self.viable_abilities = []
         self.played_card = None
         self.continents = {}
         self.board_layout = layout
@@ -288,6 +290,7 @@ class Game:
                 self.set_phase(Phases.PickAbilityOR)
             else:
                 self.set_phase(Phases.PickAbilityAND)
+            self.viable_abilities += played_card.abilities
         else:
             self.pick_ability(played_card.abilities[0])
         self.active_cards.remove(played_card)
@@ -363,8 +366,12 @@ class Game:
             clicked_element = self.graphic_manager.clicked_element
             if isinstance(clicked_element, Card) and self.phase == Phases.PickCard:
                 self.play_card(self.graphic_manager.clicked_element)
-            elif isinstance(clicked_element, Ability) and self.phase == (Phases.PickAbilityAND or Phases.PickAbilityOR):
+            elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityAND:
                 self.pick_ability(clicked_element)
+                self.viable_abilities.remove(clicked_element)
+            elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityOR:
+                self.pick_ability(clicked_element)
+                self.viable_abilities = []
             elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildArmy:
                 self.build_armies(clicked_element)
             elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildCity:
@@ -374,6 +381,20 @@ class Game:
             elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
                 self.sail_armies(clicked_element)
         self.graphic_manager.prepare_side_menu_elements()
+
+    def end_move_handler(self):
+        self.set_manuevers(0)
+        self.tilemanager.reset_armies(self.active_player)
+        self.tilemanager.reset_movable_tiles(self.tiles)
+        if len(self.viable_abilities) > 0:
+            self.set_phase(Phases.PickAbilityAND)
+        else:
+            self.set_phase(Phases.PickCard)
+            self.next_player()
+        if self.active_player == 0:
+            self.turn +=1
+        self.graphic_manager.prepare_side_menu_elements()
+
 
 
 #Graphics
@@ -427,6 +448,9 @@ class GraphicManager:
         if self.game.phase == Phases.PickCard:
             for card in self.game.active_cards:
                 self.side_menu_elements.append(Card_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, card, self))
+        if self.game.phase == Phases.PickAbilityAND or self.game.phase == Phases.PickAbilityOR:
+            for ability in self.game.viable_abilities:
+                self.side_menu_elements.append(Ability_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, ability, self))
 
     def draw_side_menu(self):
         for element in self.side_menu_elements:
@@ -444,7 +468,7 @@ class GraphicManager:
         clickable_elements = self.side_menu_elements + [tile_graphic for row in self.tile_graphics for tile_graphic in row]
         for element in clickable_elements:
             if isinstance(element, Clickable_Element) and element.clicked():
-                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None)
+                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None)
                 break
 
     def reset_clicked_element(self):
@@ -504,21 +528,21 @@ class Card_Button(Clickable_Element):
         # self.graphic_manager.side_menu_font
         self.font = pygame.font.Font(None, 24)
         self.rect = None
+        self.text_color = "text_default"
 
     def draw(self):
         ability_descriptions = [ability.ability_description for ability in self.card.abilities]
         abilities_text = ' AND '.join(ability_descriptions) if not self.card.isor else ' OR '.join(ability_descriptions)
         card_text = f"{self.card.good}({self.card.quantity}): {abilities_text}"
 
-        text_surface = self.font.render(card_text, True, self.graphic_manager.colors["text_default"])
+        text_surface = self.font.render(card_text, True, self.graphic_manager.colors[self.text_color])
         self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
 
         if self.rect.collidepoint(self.graphic_manager.mouse_pos):
-            text_color = self.graphic_manager.colors["text_highlighted"]
+            self.text_color = "text_highlighted"
         else:
-            text_color = self.graphic_manager.colors["text_default"]
+            self.text_color = "text_default"
 
-        text_surface = self.font.render(card_text, True, text_color)
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
 class Ability_Button(Clickable_Element):
@@ -529,17 +553,16 @@ class Ability_Button(Clickable_Element):
         # self.graphic_manager.side_menu_font
         self.font = pygame.font.Font(None, 24)
         self.rect = None
+        self.text_color = "text_default"
 
     def draw(self):
-        text_surface = self.font.render(self.self.ability.ability_description, True, self.graphic_manager.colors["text_default"])
+        text_surface = self.font.render(self.ability.ability_description, True, self.graphic_manager.colors[self.text_color])
         self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
-
         if self.rect.collidepoint(self.graphic_manager.mouse_pos):
-            text_color = self.graphic_manager.colors["text_highlighted"]
+            self.text_color = "text_highlighted"
         else:
-            text_color = self.graphic_manager.colors["text_default"]
+            self.text_color = "text_default"
 
-        text_surface = self.font.render(self.ability, True, text_color)
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
 
@@ -599,6 +622,9 @@ while running:
             TheGraphicManager.click_handler()
             TheGame.gameloop()
             TheGraphicManager.reset_clicked_element()
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                TheGame.end_move_handler()
     TheGraphicManager.graphics()
 
 # Quit Pygame
