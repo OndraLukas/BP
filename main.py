@@ -11,13 +11,13 @@ pygame.font.init()
 FONT = pygame.font.Font(None, 24)
 MARGIN = 2
 SCREEN_WIDTH = 1024
-SCREEN_HEIGHT = 768
+SCREEN_HEIGHT = 720
 COLORS = {
-    "dark_blue" : (0, 0, 139),
-    "dark_green" : (0, 100, 0),
-    "light_green" : (0, 150, 0),
-    "white" : (255, 255, 255),
-    "yellow" : (250, 250, 0),
+    "water_tile" : (0, 0, 139),
+    "ground_tile" : (0, 100, 0),
+    "clickable_tile" : (0, 150, 0),
+    "text_default" : (255, 255, 255),
+    "text_highlighted" : (250, 250, 0),
     "player_red" : (255, 0, 0),
     "player_green" : (0, 255, 0),
     "player_blue" : (0, 0, 255),
@@ -26,25 +26,16 @@ COLORS = {
 }
 STARTING_ARMIES = 3
 
-# Player colors
-player_colors = [
-    (255, 0, 0),  # Player 1: Red
-    (0, 255, 0),  # Player 2: Green
-    (0, 0, 255),  # Player 3: Blue
-    (255, 255, 0),  # Player 4: Yellow
-    (255, 165, 0),  # Player 5: Orange
-]
-
 #Enums
 class Phases(Enum):
-    PickCard = 0
-    PickAbilityAND = 1
-    PickAbilityOR = 2
-    BuildArmy = 3
-    BuildCity = 4
-    MoveArmy = 5
-    DestroyArmy = 5
-    SailArmy = 7
+    PickCard = 1
+    PickAbilityAND = 2
+    PickAbilityOR = 3
+    BuildArmy = 4
+    BuildCity = 5
+    MoveArmy = 6
+    DestroyArmy = 7
+    SailArmy = 8
 
 #Card
 class Card:
@@ -104,14 +95,11 @@ class Tile:
         self.cities = [0, 0, 0, 0, 0]
         self.neighbours = []
         self.is_starting_tile = False
-        self.movable = False
+        self.clickable = False
         self.move_cost = -1
 
     def make_starting_tile(self):
-        if self.tile_type == "ground":
-            self.is_starting_tile = True
-        else:
-            print("Error: Starting tiles must be ground tiles.")
+        self.is_starting_tile = True
 
     def add_neighbour(self, neighbour):
         if neighbour not in self.neighbours:
@@ -144,11 +132,11 @@ class Tile:
     def set_movecost(self, number):
         self.move_cost = number
 
-    def set_movable(self):
-        self.movable = True
+    def set_clickable(self):
+        self.clickable = True
 
-    def set_nonmovable(self):
-        self.movable = False
+    def set_nonclickable(self):
+        self.clickable = False
 
 #Tile manager
 class TileManager:
@@ -182,39 +170,38 @@ class TileManager:
         return citycount
 
     def movable_tiles(self, target_tile, reserve, original):
-        target_tile.movable = True
+        target_tile.clickable = True
         target_tile.set_movecost(original - reserve)
         reserve = reserve - self.selected_armies
         if(reserve >= 0):
             for neihgbour in target_tile.neighbours:
-                if not(neihgbour.movable) and not(neihgbour.tile_type == "water"):
+                if not(neihgbour.clickable) and not(neihgbour.tile_type == "water"):
                     self.movable_tiles(neihgbour, reserve, original)
 
     def sailable_tiles(self, target_tile, reserve, original):
         if target_tile.tile_type == "ground":
-            target_tile.movable = True
+            target_tile.clickable = True
             target_tile.set_movecost(original - reserve)
             reserve = reserve - self.selected_armies
             if (reserve >= 0):
                 for neihgbour in target_tile.neighbours:
-                    if not (neihgbour.movable):
+                    if not (neihgbour.clickable):
                         self.sailable_tiles(neihgbour, reserve, original)
         else:
             for neihgbour in target_tile.neighbours:
-                if not(neihgbour.movable) and not(neihgbour.tile_type == "water"):
+                if not(neihgbour.clickable) and not(neihgbour.tile_type == "water"):
                     self.sailable_tiles(neihgbour, reserve, original)
-
-
 
     def reset_movable_tiles(self, tiles):
         for row in tiles:
             for tile in row:
-                tile.set_nonmovable()
+                tile.set_nonclickable()
                 tile.move_cost = -1
 
 #Player
 class Player:
-    def __init__(self, AI, color):
+    def __init__(self, name, AI, color):
+        self.name = name
         self.armies = 3
         self.cities = 0
         self.AI = AI
@@ -237,6 +224,8 @@ class Game:
         self.tilemanager = tilemanager
         self.manuevers = 0
         self.abilities_to_select = {}
+        self.turn = 1
+        self.graphic_manager = None
 
     def create_board(self):
         continent_counter = 0
@@ -307,7 +296,6 @@ class Game:
         self.set_manuevers(picked_ability.manuevers)
         if isinstance(picked_ability, BuildArmies):
             self.set_phase(Phases.BuildArmy)
-            print("test1")
         elif isinstance(picked_ability, BuildCities):
             self.set_phase(Phases.BuildCity)
         elif isinstance(picked_ability, MoveArmies):
@@ -349,7 +337,7 @@ class Game:
             self.tilemanager.set_selected_armies(self.tilemanager.selected_armies + 1)
             self.tilemanager.movable_tiles(target_tile, self.manuevers, self.manuevers)
             self.tilemanager.set_active_tile(target_tile)
-        elif isinstance(target_tile, Tile) and target_tile.movable:
+        elif isinstance(target_tile, Tile) and target_tile.clickable:
             target_tile.add_armies(self.active_player, self.tilemanager.selected_armies)
             self.set_manuevers(self.manuevers - target_tile.move_cost)
             self.tilemanager.set_selected_armies(0)
@@ -363,179 +351,214 @@ class Game:
             self.tilemanager.set_selected_armies(self.tilemanager.selected_armies + 1)
             self.tilemanager.sailable_tiles(target_tile, self.manuevers, self.manuevers)
             self.tilemanager.set_active_tile(target_tile)
-        elif isinstance(target_tile, Tile) and target_tile.movable:
+        elif isinstance(target_tile, Tile) and target_tile.clickable:
             target_tile.add_armies(self.active_player, self.tilemanager.selected_armies)
             self.set_manuevers(self.manuevers - target_tile.move_cost)
             self.tilemanager.set_selected_armies(0)
             self.tilemanager.reset_movable_tiles(self.tiles)
             self.tilemanager.set_active_tile(None)
 
-    def gameloop(self, graphicmanager):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            element_type, element = graphicmanager.get_element()
-            if element_type == 'card' and self.phase == Phases.PickCard:
-                self.play_card(element)
-            elif element_type == 'ability' and self.phase == (Phases.PickAbilityAND or Phases.PickAbilityOR):
-                self.pick_ability(element)
-            elif element_type == 'tile' and self.phase == Phases.BuildArmy:
-                self.build_armies(element)
-            elif element_type == 'tile' and self.phase == Phases.BuildCity:
-                self.build_cities(element)
-            elif element_type == 'tile' and self.phase == Phases.MoveArmy:
-                self.move_armies(element)
-            elif element_type == 'tile' and self.phase == Phases.SailArmy:
-                self.sail_armies(element)
+    def gameloop(self):
+        if self.graphic_manager.clicked_element:
+            clicked_element = self.graphic_manager.clicked_element
+            if isinstance(clicked_element, Card) and self.phase == Phases.PickCard:
+                self.play_card(self.graphic_manager.clicked_element)
+            elif isinstance(clicked_element, Ability) and self.phase == (Phases.PickAbilityAND or Phases.PickAbilityOR):
+                self.pick_ability(clicked_element)
+            elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildArmy:
+                self.build_armies(clicked_element)
+            elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildCity:
+                self.build_cities(clicked_element)
+            elif isinstance(clicked_element, Tile) and self.phase == Phases.MoveArmy:
+                self.move_armies(clicked_element)
+            elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
+                self.sail_armies(clicked_element)
+        self.graphic_manager.prepare_side_menu_elements()
 
 
-#Graphic manager
+#Graphics
 class GraphicManager:
-    def __init__(self, screen_width, screen_height, colors):
+    def __init__(self, screen_width, screen_height, colors, game):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)
         self.colors = colors
-        self.mouse_y = 0
-        self.mouse_x = 0
-        self.card_info_start_x = 0
+        self.game = game
+        self.game.graphic_manager = self
+        self.max_board_height = self.screen_height * 2 / 3
+        self.tile_margin = 5
+        self.tile_size = self.calculate_tile_size(len(self.game.tiles))
+        self.tile_graphics = []
+        self.prepare_tile_graphics()
+        num_columns = len(self.game.tiles[0])
+        board_width = num_columns * self.tile_size + (num_columns + 1) * self.tile_margin
+        self.side_menu_x = board_width + 10
+        self.side_menu_y_start = 10
+        self.side_menu_spacing = 30
+        self.side_menu_elements = []
+        self.prepare_side_menu_elements()
+        self.clicked_element = None
+        self.mouse_pos = pygame.mouse.get_pos()
+        self.clicked_pos = None
 
-        # Update scaling factors based on current screen size
-        self.update_scaling_factors()
+    def calculate_tile_size(self, num_rows):
+        available_height = self.max_board_height - (num_rows + 1) * self.tile_margin
+        tile_size = available_height / num_rows
+        return int(tile_size)
 
-    def calculate_layout(self):
-        # Estimate maximum width required for the board
-        board_max_width = self.margin + (self.tile_size + self.margin) * self.board_columns
+    def prepare_tile_graphics(self):
+        for row_index, row in enumerate(self.game.tiles):
+            tile_graphics_row = []
+            for col_index, tile in enumerate(row):
+                x = col_index * (self.tile_size + self.tile_margin)
+                y = row_index * (self.tile_size + self.tile_margin)
+                tile_graphic = Tile_Graphic(self.tile_size, x, y, tile, self)
+                tile_graphics_row.append(tile_graphic)
+            self.tile_graphics.append(tile_graphics_row)
 
-        # Adjust card information start position based on the board size
-        self.card_info_start_x = board_max_width + 10  # Add some buffer space between the board and the card info
+    def draw_board(self):
+        for row in self.tile_graphics:
+            for tile_graphic in row:
+                tile_graphic.draw()
 
-        # Ensure card information does not go off screen
-        if self.card_info_start_x + 360 > self.screen_width:
-            # Adjust the layout dynamically if there is not enough space
-            self.tile_size = (self.screen_width - self.margin * (self.board_columns + 1) - 360) / self.board_columns
-            self.card_info_start_x = self.screen_width - 350  # Place card info at the right edge
+    def prepare_side_menu_elements(self):
+        self.side_menu_elements = [Side_Menu_Title(self.side_menu_y_start, self)]
 
-    def update_scaling_factors(self):
-        # Base design resolution
-        self.base_width = 1920
-        self.base_height = 1080
+        if self.game.phase == Phases.PickCard:
+            for card in self.game.active_cards:
+                self.side_menu_elements.append(Card_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, card, self))
 
-        # Calculate scaling factors
-        self.scale_factor_width = self.screen_width / self.base_width
-        self.scale_factor_height = self.screen_height / self.base_height
-
-        # Dynamically adjust sizes based on screen size
-        self.margin = max(6 * self.scale_factor_width, 1)
-        self.tile_size = max(40 * self.scale_factor_width, 20)  # Ensure minimum tile size
-        self.font_size = max(int(50 * self.scale_factor_width), 10)  # Ensure minimum font size
-        self.font = pygame.font.Font(None, self.font_size)
-
-    def assign_game(self, assigned_game):
-        self.active_game = assigned_game
-        self.board_rows = len(assigned_game.board_layout)
-        self.board_columns = len(assigned_game.board_layout[0])
-        self.update_board_tile_size()
-
-    def update_board_tile_size(self):
-        # Adjust tile size to fit the board within the screen dynamically
-        tile_width = (self.screen_width - self.margin * (self.board_columns + 1)) / self.board_columns
-        tile_height = (self.screen_height - self.margin * (self.board_rows + 1)) / self.board_rows
-        self.tile_size = min(tile_width, tile_height)
-
-    def get_element(self):
-        # First, check if the click is on a tile
-        for y, row in enumerate(self.active_game.tiles):
-            for x, tile in enumerate(row):
-                rect = pygame.Rect(x * (self.tile_size + self.margin) + self.margin,
-                                   y * (self.tile_size + self.margin) + self.margin,
-                                   self.tile_size, self.tile_size)
-                if rect.collidepoint(self.mouse_x, self.mouse_y):
-                    return ('tile', tile)
-
-        # Now, check if the click is on a card
-        card_info_area_width = 350  # Width of the card info area
-        start_x = self.screen_width - card_info_area_width  # Start position for card info
-        start_y = 10  # Starting Y position for card info
-        card_height = 60  # Adjusted height for cards
-        gap_between_cards = 5  # Gap between each card description
-
-        for index, card in enumerate(self.active_game.active_cards):
-            card_rect = pygame.Rect(start_x, start_y + (card_height + gap_between_cards) * index,
-                                    card_info_area_width - 10, card_height)
-            if card_rect.collidepoint(self.mouse_x, self.mouse_y):
-                return ('card', card)
-
-        # If the click is neither on a tile nor a card
-        return (None, None)
+    def draw_side_menu(self):
+        for element in self.side_menu_elements:
+            element.draw()
 
     def graphics(self):
         self.screen.fill(self.colors.get('background', (0, 0, 0)))
-        self.calculate_layout()
+        self.mouse_pos = pygame.mouse.get_pos()
         self.draw_board()
-        self.draw_cards_info()
+        self.draw_side_menu()
         pygame.display.flip()
 
-    def draw_board(self):
-        for y, row in enumerate(self.active_game.tiles):
-            for x, tile in enumerate(row):
-                rect = pygame.Rect(x * (self.tile_size + self.margin) + self.margin, y * (self.tile_size + self.margin) + self.margin, self.tile_size, self.tile_size)
-                pygame.draw.rect(self.screen, self.colors['dark_blue'] if tile.tile_type == 'water' else self.colors['light_green'] if tile.movable else self.colors['dark_green'], rect)
+    def click_handler(self):
+        self.clicked_pos = self.mouse_pos
+        clickable_elements = self.side_menu_elements + [tile_graphic for row in self.tile_graphics for tile_graphic in row]
+        for element in clickable_elements:
+            if isinstance(element, Clickable_Element) and element.clicked():
+                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None)
+                break
 
-                city_y = rect.y + 5
-                army_y = rect.y + rect.height / 2 + 5
+    def reset_clicked_element(self):
+        self.clicked_element = None
 
-                if tile.is_starting_tile:
-                    s_text = self.font.render('S', True, self.colors['white'])
-                    s_x = rect.x + (rect.width - s_text.get_width()) / 2
-                    s_y = (city_y + army_y) / 2 - s_text.get_height() / 2
-                    self.screen.blit(s_text, (s_x, s_y))
+class Clickable_Element:
+    def __init__(self, graphic_manager):
+        self.graphic_manager = graphic_manager
+        self.rect = None
 
-                space_per_player = rect.width / 5
-                for player_index in range(len(self.active_game.players)):
-                    if tile.cities[player_index] > 0:
-                        city_text = self.font.render(str(tile.cities[player_index]), True, self.active_game.players[player_index].color)
-                        text_x = rect.x + player_index * space_per_player + (space_per_player - city_text.get_width()) / 2
-                        self.screen.blit(city_text, (text_x, city_y))
-                    if tile.armies[player_index] > 0:
-                        army_text = self.font.render(str(tile.armies[player_index]), True, self.active_game.players[player_index].color)
-                        text_x = rect.x + player_index * space_per_player + (space_per_player - army_text.get_width()) / 2
-                        self.screen.blit(army_text, (text_x, army_y))
-        pass
+    def clicked(self):
+        if self.rect.collidepoint(self.graphic_manager.clicked_pos):
+            return True
 
-    def draw_cards_info(self):
-        card_info_area_width = 350  # Width of the card info area
-        start_x = self.screen_width - card_info_area_width  # Adjust to draw on the left side
-        start_y = 10  # Start drawing from the top
-        card_height = 60  # Increase height for potential multiline text
-        gap_between_cards = 5  # Gap between each card description
+class Tile_Graphic(Clickable_Element):
+    def __init__(self, tile_size, x, y, tile, graphic_manager):
+        super().__init__(graphic_manager)
+        self.tile_size = tile_size
+        self.x = x
+        self.y = y
+        self.tile = tile
+        self.font = pygame.font.Font(None, int(self.tile_size/4))
+        self.rect = pygame.Rect(self.x, self.y, self.tile_size, self.tile_size)
 
-        # Dynamically adjust font size based on the width of the area
-        font_size = int(card_info_area_width / 15)
-        local_font = pygame.font.Font(None, font_size)
+    def draw(self):
+        if self.tile.clickable:
+            pygame.draw.rect(self.graphic_manager.screen, self.graphic_manager.colors["clickable_tile"], self.rect)
+        elif self.tile.tile_type == "water":
+            pygame.draw.rect(self.graphic_manager.screen, self.graphic_manager.colors["water_tile"], self.rect)
+        elif self.tile.tile_type == "ground":
+            pygame.draw.rect(self.graphic_manager.screen, self.graphic_manager.colors["ground_tile"], self.rect)
+        if self.tile.is_starting_tile:
+            text_surface = self.font.render('S', True, self.graphic_manager.colors["text_default"])
+            text_x = self.x + (self.tile_size - text_surface.get_width()) / 2
+            text_y = self.y + (self.tile_size - text_surface.get_height()) / 2
+            self.graphic_manager.screen.blit(text_surface, (text_x, text_y))
+        for player_index, armies in enumerate(self.tile.armies):
+            if armies > 0:
+                player_color = self.graphic_manager.game.players[player_index].color
+                army_text = self.font.render(str(armies), True, self.graphic_manager.colors[player_color])
+                army_text_x = + self.x + (player_index * (self.tile_size / 5)) + int(self.tile_size/20)
+                army_text_y = self.y + self.tile_size - self.font.get_height() - 5
+                self.graphic_manager.screen.blit(army_text, (army_text_x, army_text_y))
+        for player_index, cities in enumerate(self.tile.cities):
+            if cities > 0:
+                player_color = self.graphic_manager.game.players[player_index].color
+                city_text = self.font.render(str(cities), True, self.graphic_manager.colors[player_color])
+                city_text_x = self.x + (player_index * (self.tile_size / 5)) + int(self.tile_size/20)
+                city_text_y = self.y + 5
+                self.graphic_manager.screen.blit(city_text, (city_text_x, city_text_y))
 
-        if self.active_game.phase == Phases.PickCard:
-            for index, card in enumerate(self.active_game.active_cards):
-                # Construct card description
-                abilities_text = [ability.ability_description for ability in card.abilities]
+class Card_Button(Clickable_Element):
+    def __init__(self, y, card, graphic_manager):
+        super().__init__(graphic_manager)
+        self.y = y
+        self.card = card
+        # self.graphic_manager.side_menu_font
+        self.font = pygame.font.Font(None, 24)
+        self.rect = None
 
-                if card.isor:
-                    abilities_description = " or ".join(abilities_text)
-                else:
-                    abilities_description = " and ".join(abilities_text)
+    def draw(self):
+        ability_descriptions = [ability.ability_description for ability in self.card.abilities]
+        abilities_text = ' AND '.join(ability_descriptions) if not self.card.isor else ' OR '.join(ability_descriptions)
+        card_text = f"{self.card.good}({self.card.quantity}): {abilities_text}"
 
-                card_text = f"{card.good} ({card.quantity}): {abilities_description}"
+        text_surface = self.font.render(card_text, True, self.graphic_manager.colors["text_default"])
+        self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
 
-            # Here you could implement logic to split `card_text` into multiple lines if it's too long
-            # This example does not include such logic for simplicity
+        if self.rect.collidepoint(self.graphic_manager.mouse_pos):
+            text_color = self.graphic_manager.colors["text_highlighted"]
+        else:
+            text_color = self.graphic_manager.colors["text_default"]
 
-            # Check if the mouse is over this card
-                card_rect = pygame.Rect(start_x, start_y + (card_height + gap_between_cards) * index,
-                                        card_info_area_width - 10, card_height)
-                if card_rect.collidepoint(self.mouse_x, self.mouse_y):
-                    pygame.draw.rect(self.screen, self.colors['yellow'], card_rect)  # Highlight the background
+        text_surface = self.font.render(card_text, True, text_color)
+        self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
-            # Render the card text
-                text_surface = local_font.render(card_text, True, self.colors['white'])
-                self.screen.blit(text_surface, (start_x + 5, start_y + (card_height + gap_between_cards) * index))
+class Ability_Button(Clickable_Element):
+    def __init__(self, y, ability, graphic_manager):
+        super().__init__(graphic_manager)
+        self.y = y
+        self.ability = ability
+        # self.graphic_manager.side_menu_font
+        self.font = pygame.font.Font(None, 24)
+        self.rect = None
+
+    def draw(self):
+        text_surface = self.font.render(self.self.ability.ability_description, True, self.graphic_manager.colors["text_default"])
+        self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
+
+        if self.rect.collidepoint(self.graphic_manager.mouse_pos):
+            text_color = self.graphic_manager.colors["text_highlighted"]
+        else:
+            text_color = self.graphic_manager.colors["text_default"]
+
+        text_surface = self.font.render(self.ability, True, text_color)
+        self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
+
+
+class Side_Menu_Title:
+    def __init__(self, y, graphic_manager):
+        self.y = y
+        self.graphic_manager = graphic_manager
+        # self.graphic_manager.side_menu_font
+        self.font = pygame.font.Font(None, 24)
+
+    def draw(self):
+        player_color = self.graphic_manager.game.players[self.graphic_manager.game.active_player].color
+        text = f"{self.graphic_manager.game.players[self.graphic_manager.game.active_player].name}:Turn {self.graphic_manager.game.turn}:{self.graphic_manager.game.phase.name}"
+        if self.graphic_manager.game.manuevers > 0:
+            text +=f" {self.graphic_manager.game.manuevers}"
+        text_surface = self.font.render(text, True, self.graphic_manager.colors[player_color])
+        self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
+
+
 
 
 #GameSetup
@@ -548,8 +571,8 @@ board_layout = [
 ]
 
 players = []
-players.append(Player(False,player_colors[0]))
-players.append(Player(False,player_colors[1]))
+players.append(Player("Player 1",False,"player_red"))
+players.append(Player("Player 2",False,"player_green"))
 random.shuffle(players)
 
 testcards = []
@@ -563,9 +586,8 @@ testcards.append(Card([DestroyArmies(1), BuildCities(1)], "Wood", 1, True))
 TheTileManager = TileManager()
 
 TheGame = Game(board_layout, players, TheTileManager, STARTING_ARMIES)
-TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS)
-TheGraphicManager.assign_game(TheGame)
 TheGame.set_active_cards(testcards)
+TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
 
 
 running = True
@@ -573,37 +595,10 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        elif event.type == pygame.VIDEORESIZE:
-            # Update screen size
-            TheGraphicManager.screen_width, TheGraphicManager.screen_height = event.size
-            TheGraphicManager.screen = pygame.display.set_mode(
-                (TheGraphicManager.screen_width, TheGraphicManager.screen_height), pygame.RESIZABLE)
-            # Update scaling factors and adjust graphics accordingly
-            TheGraphicManager.update_scaling_factors()
-            TheGraphicManager.update_board_tile_size()
-        elif event.type == pygame.KEYDOWN:
-            TheGame.tilemanager.reset_armies(TheGame.active_player)
-            TheGame.tilemanager.reset_movable_tiles(TheGame.tiles)
-            if event.key == pygame.K_1:
-                TheGame.phase = Phases.BuildArmy
-                print("Build army")
-            elif event.key == pygame.K_2:
-                TheGame.phase = Phases.BuildCity
-                print("Build city")
-            elif event.key == pygame.K_3:
-                TheGame.phase = Phases.MoveArmy
-                print("Move armies")
-            elif event.key == pygame.K_5:
-                TheGame.phase = Phases.SailArmy
-                print("Sail armies")
-            elif event.key == pygame.K_SPACE:
-                TheGame.next_player()
-                TheGame.set_manuevers(5)
-                print("Active player is: " + str(TheGame.active_player))
-        elif event.type == pygame.MOUSEMOTION:
-            # Update mouse position
-            TheGraphicManager.mouse_x, TheGraphicManager.mouse_y = event.pos
-        TheGame.gameloop(TheGraphicManager)
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            TheGraphicManager.click_handler()
+            TheGame.gameloop()
+            TheGraphicManager.reset_clicked_element()
     TheGraphicManager.graphics()
 
 # Quit Pygame
