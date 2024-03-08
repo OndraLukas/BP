@@ -2,6 +2,7 @@ import random
 from enum import Enum
 import pygame
 import sys
+import math
 
 # Initialize Pygame
 pygame.init()
@@ -44,6 +45,10 @@ class Card:
         self.good = good
         self.quantity = quantity
         self.isor = isor
+        self.cost = 0
+
+    def set_cost(self, number):
+        self.cost = number
 
 class Ability:
     def __init__(self, manuevers):
@@ -104,7 +109,7 @@ class Tile:
     def add_neighbour(self, neighbour):
         if neighbour not in self.neighbours:
             self.neighbours.append(neighbour)
-            neighbour.neighbours.append(self)  # Ensure the relationship is bidirectional
+            neighbour.neighbours.append(self)
 
     def set_armies(self, player_index, number):
         self.armies[player_index] = number
@@ -208,6 +213,13 @@ class Player:
         self.AI = AI
         self.color = color
         self.goods = {}
+        self.coins = 0
+
+    def spend_coins(self, number):
+        self.coins -= number
+
+    def set_coins(self, number):
+        self.coins = number
 
 #Game
 class Game:
@@ -228,6 +240,7 @@ class Game:
         self.abilities_to_select = {}
         self.turn = 1
         self.graphic_manager = None
+        self.set_player_coins()
 
     def create_board(self):
         continent_counter = 0
@@ -281,10 +294,20 @@ class Game:
     def set_phase(self, phase):
         self.phase = phase
 
+    def set_player_coins(self):
+        for player in self.players:
+            player.set_coins(14)
+
+    def set_cards_cost(self):
+        for card_index, card in enumerate(self.active_cards):
+            card.set_cost(math.ceil(card_index/2))
+
     def set_active_cards(self, cards):
         self.active_cards = cards
+        self.set_cards_cost()
 
     def play_card(self, played_card):
+        self.players[self.active_player].spend_coins(played_card.cost)
         if len(played_card.abilities) > 1:
             if played_card.isor:
                 self.set_phase(Phases.PickAbilityOR)
@@ -364,7 +387,7 @@ class Game:
     def gameloop(self):
         if self.graphic_manager.clicked_element:
             clicked_element = self.graphic_manager.clicked_element
-            if isinstance(clicked_element, Card) and self.phase == Phases.PickCard:
+            if isinstance(clicked_element, Card) and self.phase == Phases.PickCard and clicked_element.cost <= self.players[self.active_player].coins:
                 self.play_card(self.graphic_manager.clicked_element)
             elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityAND:
                 self.pick_ability(clicked_element)
@@ -376,8 +399,12 @@ class Game:
                 self.build_armies(clicked_element)
             elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildCity:
                 self.build_cities(clicked_element)
-            elif isinstance(clicked_element, Tile) and self.phase == Phases.MoveArmy:
-                self.move_armies(clicked_element)
+            elif isinstance(clicked_element, Tile) and self.phase == Phases.MoveArmy:    
+                self.move_armies(clicked_element)                                        
+            elif isinstance(clicked_element, Tile) and self.phase == Phases.DestroyArmy:
+                self.destroy_armies(clicked_element)
+            elif isinstance(clicked_element, Player) and self.phase == Phases.DestroyArmy:
+                self.target_player(clicked_element)
             elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
                 self.sail_armies(clicked_element)
         self.graphic_manager.prepare_side_menu_elements()
@@ -386,6 +413,7 @@ class Game:
         self.set_manuevers(0)
         self.tilemanager.reset_armies(self.active_player)
         self.tilemanager.reset_movable_tiles(self.tiles)
+        self.set_cards_cost()
         if len(self.viable_abilities) > 0:
             self.set_phase(Phases.PickAbilityAND)
         else:
@@ -408,7 +436,7 @@ class GraphicManager:
         self.game.graphic_manager = self
         self.max_board_height = self.screen_height * 2 / 3
         self.tile_margin = 5
-        self.tile_size = self.calculate_tile_size(len(self.game.tiles))
+        self.tile_size = 100
         self.tile_graphics = []
         self.prepare_tile_graphics()
         num_columns = len(self.game.tiles[0])
@@ -421,11 +449,6 @@ class GraphicManager:
         self.clicked_element = None
         self.mouse_pos = pygame.mouse.get_pos()
         self.clicked_pos = None
-
-    def calculate_tile_size(self, num_rows):
-        available_height = self.max_board_height - (num_rows + 1) * self.tile_margin
-        tile_size = available_height / num_rows
-        return int(tile_size)
 
     def prepare_tile_graphics(self):
         for row_index, row in enumerate(self.game.tiles):
@@ -451,6 +474,14 @@ class GraphicManager:
         if self.game.phase == Phases.PickAbilityAND or self.game.phase == Phases.PickAbilityOR:
             for ability in self.game.viable_abilities:
                 self.side_menu_elements.append(Ability_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, ability, self))
+        if self.game.phase == Phases.DestroyArmy:
+            viable_players = []
+            viable_players += self.game.players
+            viable_players.remove(self.game.players[self.game.active_player])
+            for target in viable_players:
+                self.side_menu_elements.append(Target_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, target, self))
+
+
 
     def draw_side_menu(self):
         for element in self.side_menu_elements:
@@ -468,7 +499,7 @@ class GraphicManager:
         clickable_elements = self.side_menu_elements + [tile_graphic for row in self.tile_graphics for tile_graphic in row]
         for element in clickable_elements:
             if isinstance(element, Clickable_Element) and element.clicked():
-                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None)
+                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None) or getattr(element,'player',None)
                 break
 
     def reset_clicked_element(self):
@@ -533,7 +564,7 @@ class Card_Button(Clickable_Element):
     def draw(self):
         ability_descriptions = [ability.ability_description for ability in self.card.abilities]
         abilities_text = ' AND '.join(ability_descriptions) if not self.card.isor else ' OR '.join(ability_descriptions)
-        card_text = f"{self.card.good}({self.card.quantity}): {abilities_text}"
+        card_text = f"Cost {self.card.cost}:{self.card.good}({self.card.quantity}): {abilities_text}"
 
         text_surface = self.font.render(card_text, True, self.graphic_manager.colors[self.text_color])
         self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
@@ -565,6 +596,25 @@ class Ability_Button(Clickable_Element):
 
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
+class Target_Button(Clickable_Element):
+    def __init__(self, y, player, graphic_manager):
+        super().__init__(graphic_manager)
+        self.y = y
+        self.player = player
+        # self.graphic_manager.side_menu_font
+        self.font = pygame.font.Font(None, 24)
+        self.rect = None
+        self.text_color = "text_default"
+
+    def draw(self):
+        text_surface = self.font.render(self.player.name, True, self.graphic_manager.colors[self.text_color])
+        self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
+        if self.rect.collidepoint(self.graphic_manager.mouse_pos):
+            self.text_color = "text_highlighted"
+        else:
+            self.text_color = self.player.color
+
+        self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
 class Side_Menu_Title:
     def __init__(self, y, graphic_manager):
@@ -575,7 +625,9 @@ class Side_Menu_Title:
 
     def draw(self):
         player_color = self.graphic_manager.game.players[self.graphic_manager.game.active_player].color
-        text = f"{self.graphic_manager.game.players[self.graphic_manager.game.active_player].name}:Turn {self.graphic_manager.game.turn}:{self.graphic_manager.game.phase.name}"
+        player_name = self.graphic_manager.game.players[self.graphic_manager.game.active_player].name
+        player_coins = self.graphic_manager.game.players[self.graphic_manager.game.active_player].coins
+        text = f"{player_name}:({player_coins}):Turn {self.graphic_manager.game.turn}:{self.graphic_manager.game.phase.name}"
         if self.graphic_manager.game.manuevers > 0:
             text +=f" {self.graphic_manager.game.manuevers}"
         text_surface = self.font.render(text, True, self.graphic_manager.colors[player_color])
