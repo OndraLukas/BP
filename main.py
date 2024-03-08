@@ -9,8 +9,6 @@ pygame.init()
 pygame.font.init()
 
 #Globální proměnné
-FONT = pygame.font.Font(None, 24)
-MARGIN = 2
 SCREEN_WIDTH = 1024
 SCREEN_HEIGHT = 720
 COLORS = {
@@ -357,25 +355,25 @@ class Game:
             self.set_manuevers(self.manuevers - 1)
 
     def build_armies(self, target_tile):
-        if isinstance(target_tile, Tile) and (target_tile.is_starting_tile or target_tile.cities[self.active_player] > 0) and self.players[self.active_player].armies < 14 and self.manuevers > 0:
+        if (target_tile.is_starting_tile or target_tile.cities[self.active_player] > 0) and self.players[self.active_player].armies < 14 and self.manuevers > 0:
             target_tile.add_army(self.active_player)
             players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
             self.set_manuevers(self.manuevers - 1)
 
     def build_cities(self, target_tile):
-        if isinstance(target_tile, Tile) and target_tile.armies[self.active_player] > 0 and self.players[self.active_player].cities < 3 and self.manuevers > 0:
+        if target_tile.armies[self.active_player] > 0 and self.players[self.active_player].cities < 3 and self.manuevers > 0:
             target_tile.add_city(self.active_player)
             players[self.active_player].cities = self.tilemanager.count_cities(self.active_player, self.tiles)
             self.set_manuevers(self.manuevers-1)
 
     def move_armies(self, target_tile):
-        if isinstance(target_tile, Tile) and target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
+        if target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
             self.tilemanager.reset_movable_tiles(self.tiles)
             target_tile.remove_army(self.active_player)
             self.tilemanager.set_selected_armies(self.tilemanager.selected_armies + 1)
             self.tilemanager.movable_tiles(target_tile, self.manuevers, self.manuevers)
             self.tilemanager.set_active_tile(target_tile)
-        elif isinstance(target_tile, Tile) and target_tile.clickable:
+        elif target_tile.clickable:
             target_tile.add_armies(self.active_player, self.tilemanager.selected_armies)
             self.set_manuevers(self.manuevers - target_tile.move_cost)
             self.tilemanager.set_selected_armies(0)
@@ -422,18 +420,19 @@ class Game:
         self.graphic_manager.prepare_side_menu_elements()
 
     def end_move_handler(self):
-        self.set_manuevers(0)
-        self.tilemanager.reset_armies(self.active_player)
-        self.tilemanager.reset_movable_tiles(self.tiles)
-        self.set_cards_cost()
-        if len(self.viable_abilities) > 0:
-            self.set_phase(Phases.PickAbilityAND)
-        else:
-            self.set_phase(Phases.PickCard)
-            self.next_player()
-        if self.active_player == 0:
-            self.turn +=1
-        self.graphic_manager.prepare_side_menu_elements()
+        if self.phase != Phases.PickCard:
+            self.set_manuevers(0)
+            self.tilemanager.reset_armies(self.active_player)
+            self.tilemanager.reset_movable_tiles(self.tiles)
+            self.set_cards_cost()
+            if len(self.viable_abilities) > 0:
+                self.set_phase(Phases.PickAbilityAND)
+            else:
+                self.set_phase(Phases.PickCard)
+                self.next_player()
+            if self.active_player == 0:
+                self.turn +=1
+            self.graphic_manager.prepare_side_menu_elements()
 
 
 
@@ -486,7 +485,7 @@ class GraphicManager:
         if self.game.phase == Phases.PickAbilityAND or self.game.phase == Phases.PickAbilityOR:
             for ability in self.game.viable_abilities:
                 self.side_menu_elements.append(Ability_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, ability, self))
-        if self.game.phase == Phases.DestroyArmy:
+        if self.game.phase == Phases.DestroyArmy and self.game.manuevers > 0:
             viable_players = []
             viable_players += self.game.players
             viable_players.remove(self.game.players[self.game.active_player])
@@ -642,6 +641,8 @@ class Side_Menu_Title:
         text = f"{player_name}:({player_coins}):Turn {self.graphic_manager.game.turn}:{self.graphic_manager.game.phase.name}"
         if self.graphic_manager.game.manuevers > 0:
             text +=f" {self.graphic_manager.game.manuevers}"
+            if self.graphic_manager.game.phase == Phases.DestroyArmy:
+                text +=f" (Target: {self.graphic_manager.game.target_player.name})"
         text_surface = self.font.render(text, True, self.graphic_manager.colors[player_color])
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
@@ -675,7 +676,7 @@ TheTileManager = TileManager()
 TheGame = Game(board_layout, players, TheTileManager, STARTING_ARMIES)
 TheGame.set_active_cards(testcards)
 TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
-
+TheGame.display_tile_info()
 
 running = True
 while running:
