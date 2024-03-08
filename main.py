@@ -241,6 +241,7 @@ class Game:
         self.turn = 1
         self.graphic_manager = None
         self.set_player_coins()
+        self.target_player = None
 
     def create_board(self):
         continent_counter = 0
@@ -327,6 +328,10 @@ class Game:
         elif isinstance(picked_ability, MoveArmies):
             self.set_phase(Phases.MoveArmy)
         elif isinstance(picked_ability, DestroyArmies):
+            viable_targets = []
+            viable_targets += players
+            viable_targets.remove(self.players[self.active_player])
+            self.target_player = viable_targets[0]
             self.set_phase(Phases.DestroyArmy)
         elif isinstance(picked_ability, SailArmies):
             self.set_phase(Phases.SailArmy)
@@ -344,17 +349,24 @@ class Game:
                     for i in range(len(self.players)):
                         tile.set_armies(i, number)
 
+    def destroy_armies(self, target_tile):
+        player_index = self.players.index(self.target_player)
+        if target_tile.armies[player_index] > 0 and self.manuevers > 0:
+            target_tile.remove_army(player_index)
+            players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
+            self.set_manuevers(self.manuevers - 1)
+
     def build_armies(self, target_tile):
         if isinstance(target_tile, Tile) and (target_tile.is_starting_tile or target_tile.cities[self.active_player] > 0) and self.players[self.active_player].armies < 14 and self.manuevers > 0:
             target_tile.add_army(self.active_player)
             players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
-            TheGame.set_manuevers(self.manuevers - 1)
+            self.set_manuevers(self.manuevers - 1)
 
     def build_cities(self, target_tile):
         if isinstance(target_tile, Tile) and target_tile.armies[self.active_player] > 0 and self.players[self.active_player].cities < 3 and self.manuevers > 0:
             target_tile.add_city(self.active_player)
             players[self.active_player].cities = self.tilemanager.count_cities(self.active_player, self.tiles)
-            TheGame.set_manuevers(self.manuevers-1)
+            self.set_manuevers(self.manuevers-1)
 
     def move_armies(self, target_tile):
         if isinstance(target_tile, Tile) and target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
@@ -404,7 +416,7 @@ class Game:
             elif isinstance(clicked_element, Tile) and self.phase == Phases.DestroyArmy:
                 self.destroy_armies(clicked_element)
             elif isinstance(clicked_element, Player) and self.phase == Phases.DestroyArmy:
-                self.target_player(clicked_element)
+                self.target_player = clicked_element
             elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
                 self.sail_armies(clicked_element)
         self.graphic_manager.prepare_side_menu_elements()
