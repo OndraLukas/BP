@@ -25,7 +25,7 @@ COLORS = {
 }
 STARTING_ARMIES = 3
 
-#Enums
+
 class Phases(Enum):
     PickCard = 1
     PickAbilityAND = 2
@@ -36,7 +36,20 @@ class Phases(Enum):
     DestroyArmy = 7
     SailArmy = 8
 
-#Card
+class Deck:
+    def __init__(self, goods, default_deck, bonus_deck):
+        self.default_deck = default_deck
+        self.bonus_deck = bonus_deck
+
+class Good:
+    def __init__(self,name,score):
+        self.name = name
+        self.score1 = score[0]
+        self.score2 = score[1]
+        self.score3 = score[2]
+        self.score4 = score[3]
+
+
 class Card:
     def __init__(self, abilities, good, quantity, isor):
         self.abilities = abilities
@@ -77,7 +90,6 @@ class SailArmies(Ability):
         super().__init__(manuevers)
         self.ability_description = "Sail Armies(" + str(self.manuevers) + ")"
 
-#Continents
 class Continent:
     def __init__(self, continent_id, name):
         self.continent_id = continent_id
@@ -88,7 +100,6 @@ class Continent:
         self.tiles.append(tile)
         tile.continent = self
 
-#Tiles
 class Tile:
     def __init__(self, tile_id, tile_type):
         self.tile_id = tile_id
@@ -179,7 +190,7 @@ class TileManager:
         reserve = reserve - self.selected_armies
         if(reserve >= 0):
             for neihgbour in target_tile.neighbours:
-                if not(neihgbour.clickable) and not(neihgbour.tile_type == "water"):
+                if (neihgbour.clickable == False or neihgbour.move_cost > original - reserve) and not(neihgbour.tile_type == "water"):
                     self.movable_tiles(neihgbour, reserve, original)
 
     def sailable_tiles(self, target_tile, reserve, original):
@@ -189,11 +200,11 @@ class TileManager:
             reserve = reserve - self.selected_armies
             if (reserve >= 0):
                 for neihgbour in target_tile.neighbours:
-                    if not (neihgbour.clickable):
+                    if (neihgbour.clickable == False or neihgbour.move_cost > original - reserve):
                         self.sailable_tiles(neihgbour, reserve, original)
         else:
             for neihgbour in target_tile.neighbours:
-                if not(neihgbour.clickable) and not(neihgbour.tile_type == "water"):
+                if (neihgbour.clickable == False or neihgbour.move_cost > original - reserve) and not(neihgbour.tile_type == "water"):
                     self.sailable_tiles(neihgbour, reserve, original)
 
     def reset_movable_tiles(self, tiles):
@@ -221,7 +232,7 @@ class Player:
 
 #Game
 class Game:
-    def __init__(self, layout, players, tilemanager, starting_armies):
+    def __init__(self, deck, layout, players, tilemanager, starting_armies):
         self.players = players
         self.active_player = 0
         self.tiles = []
@@ -240,6 +251,13 @@ class Game:
         self.graphic_manager = None
         self.set_player_coins()
         self.target_player = None
+        self.deck = deck
+        self.deck_cards = []
+        self.prepare_deck_cards()
+        self.max_turns = 14
+        while len(self.active_cards) < 6:
+            self.draw_card()
+        self.set_cards_cost()
 
     def create_board(self):
         continent_counter = 0
@@ -306,7 +324,12 @@ class Game:
         self.set_cards_cost()
 
     def play_card(self, played_card):
-        self.players[self.active_player].spend_coins(played_card.cost)
+        active_player = self.players[self.active_player]
+        active_player.spend_coins(played_card.cost)
+        if played_card.good in active_player.goods:
+            active_player.goods[played_card.good] += 1
+        else:
+            active_player.goods[played_card.good] = 1
         if len(played_card.abilities) > 1:
             if played_card.isor:
                 self.set_phase(Phases.PickAbilityOR)
@@ -381,13 +404,13 @@ class Game:
             self.tilemanager.set_active_tile(None)
 
     def sail_armies(self, target_tile):
-        if isinstance(target_tile, Tile) and target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
+        if target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
             self.tilemanager.reset_movable_tiles(self.tiles)
             target_tile.remove_army(self.active_player)
             self.tilemanager.set_selected_armies(self.tilemanager.selected_armies + 1)
             self.tilemanager.sailable_tiles(target_tile, self.manuevers, self.manuevers)
             self.tilemanager.set_active_tile(target_tile)
-        elif isinstance(target_tile, Tile) and target_tile.clickable:
+        elif target_tile.clickable:
             target_tile.add_armies(self.active_player, self.tilemanager.selected_armies)
             self.set_manuevers(self.manuevers - target_tile.move_cost)
             self.tilemanager.set_selected_armies(0)
@@ -424,15 +447,26 @@ class Game:
             self.set_manuevers(0)
             self.tilemanager.reset_armies(self.active_player)
             self.tilemanager.reset_movable_tiles(self.tiles)
-            self.set_cards_cost()
             if len(self.viable_abilities) > 0:
                 self.set_phase(Phases.PickAbilityAND)
             else:
                 self.set_phase(Phases.PickCard)
                 self.next_player()
+                self.draw_card()
+                self.set_cards_cost()
             if self.active_player == 0:
-                self.turn +=1
+                self.turn += 1
             self.graphic_manager.prepare_side_menu_elements()
+
+    def prepare_deck_cards(self):
+        self.deck_cards += self.deck.default_deck
+        if len(players) > 5:
+            self.deck_cards += self.deck.bonus_deck
+
+    def draw_card(self):
+        drawn_card = random.choice(self.deck_cards)
+        self.active_cards.append(drawn_card)
+        self.deck_cards.remove(drawn_card)
 
 
 
@@ -491,8 +525,6 @@ class GraphicManager:
             viable_players.remove(self.game.players[self.game.active_player])
             for target in viable_players:
                 self.side_menu_elements.append(Target_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, target, self))
-
-
 
     def draw_side_menu(self):
         for element in self.side_menu_elements:
@@ -646,9 +678,6 @@ class Side_Menu_Title:
         text_surface = self.font.render(text, True, self.graphic_manager.colors[player_color])
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
-
-
-
 #GameSetup
 board_layout = [
     "WGGWG",
@@ -663,18 +692,91 @@ players.append(Player("Player 1",False,"player_red"))
 players.append(Player("Player 2",False,"player_green"))
 random.shuffle(players)
 
-testcards = []
-testcards.append(Card([BuildArmies(3)], "Iron", 1, False))
-testcards.append(Card([BuildCities(1)], "Wood", 1, False))
-testcards.append(Card([MoveArmies(2)], "Gem", 1, False))
-testcards.append(Card([SailArmies(2)], "Coal", 1, False))
-testcards.append(Card([DestroyArmies(1), BuildArmies(1)], "Food", 1, False))
-testcards.append(Card([DestroyArmies(1), BuildCities(1)], "Wood", 1, True))
+defualtcards = []
+bonuscards = []
+defaultgoods = {
+    "Food" : Good("Food", [3,5,7,8]),
+    "Wood" : Good("Wood", [2,4,5,6]),
+    "Coal" : Good("Coal", [2,3,4,5]),
+    "Gem"  : Good("Gem", [1,2,3,4]),
+    "Iron" : Good("Iron", [2,4,6,7])
+}
+ABILITIES = {
+    "city" :  BuildCities(1),
+    "armies1" : BuildArmies(1),
+    "armies2" : BuildArmies(2),
+    "armies3" : BuildArmies(3),
+    "armies4" : BuildArmies(4),
+    "move2" : MoveArmies(2),
+    "move3" : MoveArmies(3),
+    "move4" : MoveArmies(4),
+    "move5" : MoveArmies(5),
+    "move6" : MoveArmies(6),
+    "sail2" : SailArmies(2),
+    "sail3" : SailArmies(3),
+    "sail4" : SailArmies(4),
+    "destroy" : DestroyArmies(1)
+}
+
+
+#Woodcards
+defualtcards.append(Card([ABILITIES["city"]], "Wood", 1, False))
+defualtcards.append(Card([ABILITIES["armies3"]], "Wood", 1, False))
+defualtcards.append(Card([ABILITIES["move3"]], "Wood", 1, False))
+defualtcards.append(Card([ABILITIES["sail3"]], "Wood", 1, False))
+defualtcards.append(Card([ABILITIES["sail4"]], "Wood", 1, False))
+defualtcards.append(Card([ABILITIES["armies2"], ABILITIES["sail3"]], "Wood", 1, True))
+defualtcards.append(Card([ABILITIES["destroy"], ABILITIES["city"]], "Wood", 1, True))
+bonuscards.append(Card([ABILITIES["move6"]], "Wood", 1, False))
+
+#Coalcards
+defualtcards.append(Card([ABILITIES["armies2"]], "Coal", 1, False))
+defualtcards.append(Card([ABILITIES["move2"]], "Coal", 1, False))
+defualtcards.append(Card([ABILITIES["move3"]], "Coal", 1, False))
+defualtcards.append(Card([ABILITIES["move3"]], "Coal", 1, False))
+defualtcards.append(Card([ABILITIES["sail2"]], "Coal", 1, False))
+defualtcards.append(Card([ABILITIES["sail3"]], "Coal", 1, False))
+bonuscards.append(Card([ABILITIES["sail2"]], "Coal", 1, False))
+
+#Foodcards
+defualtcards.append(Card([ABILITIES["city"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["city"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["armies3"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["armies3"]], "Food", 2, False))
+defualtcards.append(Card([ABILITIES["move4"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["move4"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["move5"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["sail3"]], "Food", 1, False))
+defualtcards.append(Card([ABILITIES["destroy"], ABILITIES["armies1"]], "Food", 1, False))
+bonuscards.append(Card([ABILITIES["armies4"], ABILITIES["move2"]], "Food", 1, True))
+
+#Gemcards
+defualtcards.append(Card([ABILITIES["armies1"]], "Gem", 1, False))
+defualtcards.append(Card([ABILITIES["armies2"]], "Gem", 1, False))
+defualtcards.append(Card([ABILITIES["armies2"]], "Gem", 1, False))
+defualtcards.append(Card([ABILITIES["move2"]], "Gem", 1, False))
+bonuscards.append(Card([ABILITIES["armies2"]], "Gem", 1, False))
+
+#Ironcards
+defualtcards.append(Card([ABILITIES["city"]], "Iron", 1, False))
+defualtcards.append(Card([ABILITIES["armies3"]], "Iron", 1, False))
+defualtcards.append(Card([ABILITIES["armies3"]], "Iron", 1, False))
+defualtcards.append(Card([ABILITIES["move4"]], "Iron", 1, False))
+defualtcards.append(Card([ABILITIES["move5"]], "Iron", 1, False))
+defualtcards.append(Card([ABILITIES["sail3"]], "Iron", 1, False))
+defualtcards.append(Card([ABILITIES["armies3"], ABILITIES["move3"]], "Iron", 1, True))
+defualtcards.append(Card([ABILITIES["armies3"], ABILITIES["move4"]], "Iron", 1, True))
+bonuscards.append(Card([ABILITIES["move4"]], "Iron", 2, False))
+
+#Jokers
+defualtcards.append(Card([ABILITIES["armies2"]], "Joker", 1, False))
+defualtcards.append(Card([ABILITIES["sail2"]], "Joker", 1, False))
+defualtcards.append(Card([ABILITIES["sail2"]], "Joker", 1, False))
 
 TheTileManager = TileManager()
 
-TheGame = Game(board_layout, players, TheTileManager, STARTING_ARMIES)
-TheGame.set_active_cards(testcards)
+TheDeck = Deck(defaultgoods, defualtcards, bonuscards)
+TheGame = Game(TheDeck, board_layout, players, TheTileManager, STARTING_ARMIES)
 TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
 TheGame.display_tile_info()
 
