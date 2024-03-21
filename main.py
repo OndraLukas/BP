@@ -24,6 +24,8 @@ COLORS = {
     "player_orange" : (255, 165, 0)
 }
 STARTING_ARMIES = 3
+MAX_ARMIES = 14
+MAX_CITIES = 3
 
 
 class Phases(Enum):
@@ -35,9 +37,11 @@ class Phases(Enum):
     MoveArmy = 6
     DestroyArmy = 7
     SailArmy = 8
+    EndGame = 9
 
 class Deck:
     def __init__(self, goods, default_deck, bonus_deck):
+        self.goods = goods
         self.default_deck = default_deck
         self.bonus_deck = bonus_deck
 
@@ -47,7 +51,7 @@ class Good:
         self.score1 = score[0]
         self.score2 = score[1]
         self.score3 = score[2]
-        self.score4 = score[3]
+        self.score5 = score[3]
 
 
 class Card:
@@ -95,10 +99,18 @@ class Continent:
         self.continent_id = continent_id
         self.name = name
         self.tiles = []
+        self.armies = [0,0,0,0,0]
+        self.cities = [0,0,0,0,0]
 
     def add_tile(self, tile):
         self.tiles.append(tile)
         tile.continent = self
+
+    def set_armies(self, player_index, number):
+        self.armies[player_index] = number
+
+    def set_cities(self, player_index, number):
+        self.cities[player_index] = number
 
 class Tile:
     def __init__(self, tile_id, tile_type):
@@ -177,11 +189,23 @@ class TileManager:
                 armycount += tile.armies[player_index]
         return armycount
 
+    def continent_army_count(self, player_index, continent):
+        armycount = 0
+        for tile in continent.tiles:
+            armycount += tile.armies[player_index]
+        return armycount
+
     def count_cities(self, player_index, tiles):
         citycount = 0
         for row in tiles:
             for tile in row:
                 citycount += tile.cities[player_index]
+        return citycount
+
+    def continent_city_count(self, player_index, continent):
+        citycount = 0
+        for tile in continent.tiles:
+            citycount += tile.cities[player_index]
         return citycount
 
     def movable_tiles(self, target_tile, reserve, original):
@@ -217,12 +241,13 @@ class TileManager:
 class Player:
     def __init__(self, name, AI, color):
         self.name = name
-        self.armies = 3
+        self.armies = 0
         self.cities = 0
         self.AI = AI
         self.color = color
         self.goods = {}
         self.coins = 0
+        self.score = 0
 
     def spend_coins(self, number):
         self.coins -= number
@@ -232,7 +257,9 @@ class Player:
 
 #Game
 class Game:
-    def __init__(self, deck, layout, players, tilemanager, starting_armies):
+    def __init__(self, deck, layout, players, tilemanager, starting_armies, max_armies, max_cities):
+        self.max_armies = max_armies
+        self.max_cities = max_cities
         self.players = players
         self.active_player = 0
         self.tiles = []
@@ -254,10 +281,12 @@ class Game:
         self.deck = deck
         self.deck_cards = []
         self.prepare_deck_cards()
-        self.max_turns = 14
+        self.max_turns = 0
+        self.set_max_turns()
         while len(self.active_cards) < 6:
             self.draw_card()
         self.set_cards_cost()
+        self.initial_counting()
 
     def create_board(self):
         continent_counter = 0
@@ -306,14 +335,45 @@ class Game:
         for row in self.tiles:
             for tile in row:
                 continent_id = tile.continent.continent_id if tile.continent else 'None'
-                print(f"Tile ID: {tile.tile_id}, Continent: {continent_id}, Type: {tile.tile_type}")
+                print(f"Tile ID: {tile.tile_id}, Continent: {continent_id}, Type: {tile.tile_type}, Armies: {tile.armies}, Cities: {tile.cities}" )
+        for continent in self.continents:
+            print(f"Continent: {continent}, Armies: {self.continents[continent].armies}, Cities: {self.continents[continent].cities}")
 
     def set_phase(self, phase):
         self.phase = phase
 
+    def initial_counting(self):
+        for player_index in range(len(self.players)):
+            self.players[player_index].armies = self.tilemanager.count_armies(player_index, self.tiles)
+            self.players[player_index].cities = self.tilemanager.count_cities(player_index, self.tiles)
+            for continent in self.continents:
+                self.continents[continent].set_armies(player_index, self.tilemanager.continent_army_count(player_index, self.continents[continent]))
+                self.continents[continent].set_cities(player_index, self.tilemanager.continent_city_count(player_index, self.continents[continent]))
+
+
     def set_player_coins(self):
-        for player in self.players:
-            player.set_coins(14)
+        if len(self.players) == 5:
+            for player in self.players:
+                player.set_coins(8)
+        if len(self.players) == 4:
+            for player in self.players:
+                player.set_coins(9)
+        if len(self.players) == 3:
+            for player in self.players:
+                player.set_coins(11)
+        else:
+            for player in self.players:
+                player.set_coins(14)
+
+    def set_max_turns(self):
+        if len(self.players) == 5:
+            self.max_turns = 13
+        if len(self.players) == 4:
+            self.max_turns = 10
+        if len(self.players) == 3:
+            self.max_turns = 8
+        else:
+            self.max_turns = 7
 
     def set_cards_cost(self):
         for card_index, card in enumerate(self.active_cards):
@@ -350,7 +410,7 @@ class Game:
             self.set_phase(Phases.MoveArmy)
         elif isinstance(picked_ability, DestroyArmies):
             viable_targets = []
-            viable_targets += players
+            viable_targets += self.players
             viable_targets.remove(self.players[self.active_player])
             self.target_player = viable_targets[0]
             self.set_phase(Phases.DestroyArmy)
@@ -374,19 +434,22 @@ class Game:
         player_index = self.players.index(self.target_player)
         if target_tile.armies[player_index] > 0 and self.manuevers > 0:
             target_tile.remove_army(player_index)
-            players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
+            players[player_index].armies = self.tilemanager.count_armies(player_index, self.tiles)
+            target_tile.continent.set_armies(player_index, self.tilemanager.continent_army_count(player_index, target_tile.continent))
             self.set_manuevers(self.manuevers - 1)
 
     def build_armies(self, target_tile):
-        if (target_tile.is_starting_tile or target_tile.cities[self.active_player] > 0) and self.players[self.active_player].armies < 14 and self.manuevers > 0:
+        if (target_tile.is_starting_tile or target_tile.cities[self.active_player] > 0) and self.players[self.active_player].armies < self.max_armies and self.manuevers > 0:
             target_tile.add_army(self.active_player)
             players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
+            target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player, target_tile.continent))
             self.set_manuevers(self.manuevers - 1)
 
     def build_cities(self, target_tile):
-        if target_tile.armies[self.active_player] > 0 and self.players[self.active_player].cities < 3 and self.manuevers > 0:
+        if target_tile.armies[self.active_player] > 0 and self.players[self.active_player].cities < self.max_cities and self.manuevers > 0:
             target_tile.add_city(self.active_player)
             players[self.active_player].cities = self.tilemanager.count_cities(self.active_player, self.tiles)
+            target_tile.continent.set_cities(self.active_player, self.tilemanager.continent_city_count(self.active_player, target_tile.continent))
             self.set_manuevers(self.manuevers-1)
 
     def move_armies(self, target_tile):
@@ -402,6 +465,8 @@ class Game:
             self.tilemanager.set_selected_armies(0)
             self.tilemanager.reset_movable_tiles(self.tiles)
             self.tilemanager.set_active_tile(None)
+        target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player,
+                                                                                                   target_tile.continent))
 
     def sail_armies(self, target_tile):
         if target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
@@ -416,8 +481,10 @@ class Game:
             self.tilemanager.set_selected_armies(0)
             self.tilemanager.reset_movable_tiles(self.tiles)
             self.tilemanager.set_active_tile(None)
+        target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player, target_tile.continent))
 
-    def gameloop(self):
+    def clickloop(self):
+        #self.display_tile_info()
         if self.graphic_manager.clicked_element:
             clicked_element = self.graphic_manager.clicked_element
             if isinstance(clicked_element, Card) and self.phase == Phases.PickCard and clicked_element.cost <= self.players[self.active_player].coins:
@@ -440,6 +507,7 @@ class Game:
                 self.target_player = clicked_element
             elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
                 self.sail_armies(clicked_element)
+        self.scoring_handler()
         self.graphic_manager.prepare_side_menu_elements()
 
     def end_move_handler(self):
@@ -447,6 +515,8 @@ class Game:
             self.set_manuevers(0)
             self.tilemanager.reset_armies(self.active_player)
             self.tilemanager.reset_movable_tiles(self.tiles)
+            if self.phase == Phases.PickAbilityOR or self.phase == Phases.PickAbilityAND:
+                self.viable_abilities = []
             if len(self.viable_abilities) > 0:
                 self.set_phase(Phases.PickAbilityAND)
             else:
@@ -456,7 +526,38 @@ class Game:
                 self.set_cards_cost()
             if self.active_player == 0:
                 self.turn += 1
-            self.graphic_manager.prepare_side_menu_elements()
+            elif self.active_player == len(self.players)-1 and self.turn == self.max_turns:
+                self.endgame_handler()
+            if self.graphic_manager:
+                self.graphic_manager.prepare_side_menu_elements()
+
+    def score_tile_or_continent(self, tile_or_continet):
+        top_player_index = 0
+        most_armies_and_cities = tile_or_continet.armies[0] + tile_or_continet.cities[0]
+        for player_index in range(len(self.players)):
+            if tile_or_continet.armies[player_index] + tile_or_continet.cities[player_index] > most_armies_and_cities:
+                top_player_index = player_index
+                most_armies_and_cities = tile_or_continet.armies[player_index] + tile_or_continet.cities[player_index]
+        for player_index in range(len(self.players)):
+            if player_index != top_player_index and most_armies_and_cities == tile_or_continet.armies[player_index] + tile_or_continet.cities[player_index]:
+                return None
+        return top_player_index
+
+    def scoring_handler(self):
+        for player in self.players:
+            player.score = 0
+        for row in self.tiles:
+            for tile in row:
+                tile_scoring = self.score_tile_or_continent(tile)
+                if tile_scoring is not None:
+                    self.players[tile_scoring].score += 1
+        for continent in self.continents:
+            continent_scoring = self.score_tile_or_continent(self.continents[continent])
+            if continent_scoring is not None:
+                self.players[continent_scoring].score += 1
+
+    def endgame_handler(self):
+        pass
 
     def prepare_deck_cards(self):
         self.deck_cards += self.deck.default_deck
@@ -479,18 +580,25 @@ class GraphicManager:
         self.colors = colors
         self.game = game
         self.game.graphic_manager = self
-        self.max_board_height = self.screen_height * 2 / 3
         self.tile_margin = 5
         self.tile_size = 100
         self.tile_graphics = []
         self.prepare_tile_graphics()
         num_columns = len(self.game.tiles[0])
+        num_rows = len(self.game.tiles)
         board_width = num_columns * self.tile_size + (num_columns + 1) * self.tile_margin
+        board_height = num_rows * self.tile_size + (num_columns + 1) * self.tile_margin
         self.side_menu_x = board_width + 10
         self.side_menu_y_start = 10
         self.side_menu_spacing = 30
         self.side_menu_elements = []
+        self.player_list_x = 10
+        self.player_list_spacing = 30
+        self.player_list_y_start = board_height + 10
+        self.player_list_elements = []
         self.prepare_side_menu_elements()
+        self.prepare_player_list()
+        self.good_list = Good_Scoring(self.game.deck.goods, self)
         self.clicked_element = None
         self.mouse_pos = pygame.mouse.get_pos()
         self.clicked_pos = None
@@ -530,11 +638,22 @@ class GraphicManager:
         for element in self.side_menu_elements:
             element.draw()
 
+    def prepare_player_list(self):
+        self.player_list_elements = []
+        for player in self.game.players:
+            self.player_list_elements.append(Player_List_Element(self.player_list_y_start + len(self.player_list_elements) * self.player_list_spacing, player, self))
+
+    def draw_player_list(self):
+        for element in self.player_list_elements:
+            element.draw()
+
     def graphics(self):
         self.screen.fill(self.colors.get('background', (0, 0, 0)))
         self.mouse_pos = pygame.mouse.get_pos()
         self.draw_board()
         self.draw_side_menu()
+        self.draw_player_list()
+        self.good_list.draw()
         pygame.display.flip()
 
     def click_handler(self):
@@ -678,6 +797,54 @@ class Side_Menu_Title:
         text_surface = self.font.render(text, True, self.graphic_manager.colors[player_color])
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
+class Player_List_Element:
+    def __init__(self, y, player, graphic_manager):
+        self.y = y
+        self.player = player
+        self.graphic_manager = graphic_manager
+        # self.graphic_manager.side_menu_font
+        self.font = pygame.font.Font(None, 24)
+
+    def draw(self):
+        text = f"{self.player.name}:({self.player.coins}):({self.player.armies} Armies"
+        if self.player.armies == self.graphic_manager.game.max_armies:
+            text += " MAX!"
+        text += f"):({self.player.cities} Cities"
+        if self.player.cities == self.graphic_manager.game.max_cities:
+            text += " MAX!"
+        text +=f") ({self.player.score} Score)"
+        for good in self.player.goods:
+            text += " " + str(self.player.goods[good]) + " " + good
+            
+        text_surface = self.font.render(text, True, self.graphic_manager.colors[self.player.color])
+        self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.player_list_x, self.y))
+
+class Good_Scoring:
+    def __init__(self, goods, graphic_manager):
+        self.graphic_manager = graphic_manager
+        self.goods = goods
+        self.font = pygame.font.Font(None, 24)
+        self.right_margin = 10
+        self.good_scoring_spacing = 20
+
+    def draw(self):
+        total_goods = len(self.goods)
+        start_y = self.graphic_manager.screen_height - (total_goods * self.good_scoring_spacing + self.right_margin)
+        for index, good in enumerate(self.goods):  # Iterating directly without sorting
+            text = f"{good}: {self.goods[good].score1}, {self.goods[good].score2}, {self.goods[good].score3}, {self.goods[good].score5}"
+            text_surface = self.font.render(text, True, self.graphic_manager.colors["text_default"])
+            text_width = text_surface.get_width()
+            x_position = self.graphic_manager.screen_width - text_width - self.right_margin
+            y_position = start_y + (index * self.good_scoring_spacing)
+            self.graphic_manager.screen.blit(text_surface, (x_position, y_position))
+
+            if y_position + self.good_scoring_spacing > self.graphic_manager.screen_height:
+                break
+
+
+
+
+
 #GameSetup
 board_layout = [
     "WGGWG",
@@ -694,7 +861,7 @@ random.shuffle(players)
 
 defualtcards = []
 bonuscards = []
-defaultgoods = {
+default_goods = {
     "Food" : Good("Food", [3,5,7,8]),
     "Wood" : Good("Wood", [2,4,5,6]),
     "Coal" : Good("Coal", [2,3,4,5]),
@@ -775,8 +942,8 @@ defualtcards.append(Card([ABILITIES["sail2"]], "Joker", 1, False))
 
 TheTileManager = TileManager()
 
-TheDeck = Deck(defaultgoods, defualtcards, bonuscards)
-TheGame = Game(TheDeck, board_layout, players, TheTileManager, STARTING_ARMIES)
+TheDeck = Deck(default_goods, defualtcards, bonuscards)
+TheGame = Game(TheDeck, board_layout, players, TheTileManager, STARTING_ARMIES, MAX_ARMIES, MAX_CITIES)
 TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
 TheGame.display_tile_info()
 
@@ -787,7 +954,7 @@ while running:
             running = False
         if event.type == pygame.MOUSEBUTTONDOWN:
             TheGraphicManager.click_handler()
-            TheGame.gameloop()
+            TheGame.clickloop()
             TheGraphicManager.reset_clicked_element()
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE:
