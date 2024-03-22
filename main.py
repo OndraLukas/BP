@@ -555,6 +555,21 @@ class Game:
             continent_scoring = self.score_tile_or_continent(self.continents[continent])
             if continent_scoring is not None:
                 self.players[continent_scoring].score += 1
+        self.goods_scoring()
+
+    def goods_scoring(self):
+        for player in self.players:
+            for player_good in player.goods:
+                for object_good in self.deck.goods:
+                    if player_good == object_good:
+                        if player.goods[player_good] >= self.deck.goods[object_good].score1:
+                            player.score += 1
+                        if player.goods[player_good] >= self.deck.goods[object_good].score2:
+                            player.score += 1
+                        if player.goods[player_good] >= self.deck.goods[object_good].score3:
+                            player.score += 1
+                        if player.goods[player_good] >= self.deck.goods[object_good].score5:
+                            player.score += 2
 
     def endgame_handler(self):
         pass
