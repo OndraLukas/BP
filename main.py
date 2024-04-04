@@ -37,7 +37,8 @@ class Phases(Enum):
     MoveArmy = 6
     DestroyArmy = 7
     SailArmy = 8
-    EndGame = 9
+    JokerAssignment = 9
+    EndGame = 10
 
 class Deck:
     def __init__(self, goods, default_deck, bonus_deck):
@@ -286,7 +287,7 @@ class Game:
         while len(self.active_cards) < 6:
             self.draw_card()
         self.set_cards_cost()
-        self.initial_counting()
+        self.thorough_counting()
 
     def create_board(self):
         continent_counter = 0
@@ -342,7 +343,7 @@ class Game:
     def set_phase(self, phase):
         self.phase = phase
 
-    def initial_counting(self):
+    def thorough_counting(self):
         for player_index in range(len(self.players)):
             self.players[player_index].armies = self.tilemanager.count_armies(player_index, self.tiles)
             self.players[player_index].cities = self.tilemanager.count_cities(player_index, self.tiles)
@@ -367,13 +368,13 @@ class Game:
 
     def set_max_turns(self):
         if len(self.players) == 5:
-            self.max_turns = 13
-        if len(self.players) == 4:
-            self.max_turns = 10
-        if len(self.players) == 3:
-            self.max_turns = 8
-        else:
             self.max_turns = 7
+        if len(self.players) == 4:
+            self.max_turns = 8
+        if len(self.players) == 3:
+            self.max_turns = 10
+        else:
+            self.max_turns = 13
 
     def set_cards_cost(self):
         for card_index, card in enumerate(self.active_cards):
@@ -386,10 +387,10 @@ class Game:
     def play_card(self, played_card):
         active_player = self.players[self.active_player]
         active_player.spend_coins(played_card.cost)
-        if played_card.good in active_player.goods:
-            active_player.goods[played_card.good] += 1
+        if played_card.good != "Joker":
+            self.add_good(self.deck.goods[played_card.good], played_card.quantity)
         else:
-            active_player.goods[played_card.good] = 1
+            self.add_joker(played_card.quantity)
         if len(played_card.abilities) > 1:
             if played_card.isor:
                 self.set_phase(Phases.PickAbilityOR)
@@ -399,6 +400,22 @@ class Game:
         else:
             self.pick_ability(played_card.abilities[0])
         self.active_cards.remove(played_card)
+
+    def add_good(self, good, quantity):
+        active_player = self.players[self.active_player]
+        if good.name in active_player.goods:
+            active_player.goods[good.name] += quantity
+        else:
+            active_player.goods[good.name] = quantity
+
+    def add_joker(self, quantity):
+        active_player = self.players[self.active_player]
+        if "Joker" in active_player.goods:
+            active_player.goods["Joker"] += quantity
+        else:
+            active_player.goods["Joker"] = quantity
+
+
 
     def pick_ability(self, picked_ability):
         self.set_manuevers(picked_ability.manuevers)
@@ -466,7 +483,7 @@ class Game:
             self.tilemanager.reset_movable_tiles(self.tiles)
             self.tilemanager.set_active_tile(None)
         target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player,
-                                                                                                   target_tile.continent))
+                                                                                            target_tile.continent))
 
     def sail_armies(self, target_tile):
         if target_tile.armies[self.active_player] > 0 and (self.tilemanager.selected_armies == 0 or target_tile.move_cost == 0):
@@ -507,13 +524,26 @@ class Game:
                 self.target_player = clicked_element
             elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
                 self.sail_armies(clicked_element)
+            elif isinstance(clicked_element, Good) and self.phase == Phases.JokerAssignment and self.manuevers > 0:
+                self.add_good(clicked_element, 1)
+                self.set_manuevers(self.manuevers-1)
         self.scoring_handler()
         self.graphic_manager.prepare_side_menu_elements()
 
     def end_move_handler(self):
-        if self.phase != Phases.PickCard:
+        if self.phase == Phases.JokerAssignment:
+            self.next_player()
+            if self.active_player == 0:
+                self.phase = Phases.EndGame
+                self.endgame_handler()
+            elif "Joker" in self.players[self.active_player].goods:
+                self.set_manuevers(self.players[self.active_player].goods["Joker"])
+            else:
+                self.set_manuevers(0)
+        elif self.phase != Phases.PickCard:
             self.set_manuevers(0)
             self.tilemanager.reset_armies(self.active_player)
+            self.tilemanager.count_armies(self.active_player, self.tiles)
             self.tilemanager.reset_movable_tiles(self.tiles)
             if self.phase == Phases.PickAbilityOR or self.phase == Phases.PickAbilityAND:
                 self.viable_abilities = []
@@ -526,10 +556,19 @@ class Game:
                 self.set_cards_cost()
             if self.active_player == 0:
                 self.turn += 1
+                if self.turn > self.max_turns:
+                    if "Joker" in self.players[self.active_player].goods:
+                        self.set_manuevers(self.players[self.active_player].goods["Joker"])
+                    else:
+                        self.set_manuevers(0)
+                    self.phase = Phases.JokerAssignment
             elif self.active_player == len(self.players)-1 and self.turn == self.max_turns:
                 self.endgame_handler()
             if self.graphic_manager:
                 self.graphic_manager.prepare_side_menu_elements()
+        self.thorough_counting()
+        self.scoring_handler()
+
 
     def score_tile_or_continent(self, tile_or_continet):
         top_player_index = 0
@@ -572,7 +611,31 @@ class Game:
                             player.score += 2
 
     def endgame_handler(self):
-        pass
+        winners = []
+        top_score = self.players[0].score
+        for player in self.players:
+            if player.score > top_score:
+                top_score = player.score
+        for player in self.players:
+            if player.score == top_score:
+                winners.append(player)
+        if len(winners) > 1:
+            top_coins = winners[0].score
+            for player in winners:
+                if player.coins > top_coins:
+                    top_coins = player.coins
+            for player in winners:
+                if player.coins < top_coins:
+                    winners.remove(player)
+        if len(winners) > 1:
+            top_armies = winners[0].armies
+            for player in winners:
+                if player.coins > top_armies:
+                    top_armies = player.armies
+            for player in winners:
+                if player.armies < top_armies:
+                    winners.remove(player)
+        return winners
 
     def prepare_deck_cards(self):
         self.deck_cards += self.deck.default_deck
@@ -583,7 +646,6 @@ class Game:
         drawn_card = random.choice(self.deck_cards)
         self.active_cards.append(drawn_card)
         self.deck_cards.remove(drawn_card)
-
 
 
 #Graphics
@@ -636,6 +698,10 @@ class GraphicManager:
     def prepare_side_menu_elements(self):
         self.side_menu_elements = [Side_Menu_Title(self.side_menu_y_start, self)]
 
+        if self.game.phase == Phases.JokerAssignment:
+            for good in self.game.deck.goods:
+                self.side_menu_elements.append(
+                    JokerAssignmentButton(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, self.game.deck.goods[good], self))
         if self.game.phase == Phases.PickCard:
             for card in self.game.active_cards:
                 self.side_menu_elements.append(Card_Button(self.side_menu_y_start + len(self.side_menu_elements) * self.side_menu_spacing, card, self))
@@ -676,7 +742,7 @@ class GraphicManager:
         clickable_elements = self.side_menu_elements + [tile_graphic for row in self.tile_graphics for tile_graphic in row]
         for element in clickable_elements:
             if isinstance(element, Clickable_Element) and element.clicked():
-                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None) or getattr(element,'player',None)
+                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None) or getattr(element,'player',None) or getattr(element,'good',None)
                 break
 
     def reset_clicked_element(self):
@@ -765,6 +831,26 @@ class Ability_Button(Clickable_Element):
 
     def draw(self):
         text_surface = self.font.render(self.ability.ability_description, True, self.graphic_manager.colors[self.text_color])
+        self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
+        if self.rect.collidepoint(self.graphic_manager.mouse_pos):
+            self.text_color = "text_highlighted"
+        else:
+            self.text_color = "text_default"
+
+        self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
+
+class JokerAssignmentButton(Clickable_Element):
+    def __init__(self, y, good, graphic_manager):
+        super().__init__(graphic_manager)
+        self.y = y
+        self.good = good
+        # self.graphic_manager.side_menu_font
+        self.font = pygame.font.Font(None, 24)
+        self.rect = None
+        self.text_color = "text_default"
+
+    def draw(self):
+        text_surface = self.font.render(self.good.name, True, self.graphic_manager.colors[self.text_color])
         self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
         if self.rect.collidepoint(self.graphic_manager.mouse_pos):
             self.text_color = "text_highlighted"
@@ -967,13 +1053,14 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            TheGraphicManager.click_handler()
-            TheGame.clickloop()
-            TheGraphicManager.reset_clicked_element()
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                TheGame.end_move_handler()
+        if TheGame.phase != Phases.EndGame:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                TheGraphicManager.click_handler()
+                TheGame.clickloop()
+                TheGraphicManager.reset_clicked_element()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    TheGame.end_move_handler()
     TheGraphicManager.graphics()
 
 # Quit Pygame
