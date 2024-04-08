@@ -288,6 +288,7 @@ class Game:
             self.draw_card()
         self.set_cards_cost()
         self.thorough_counting()
+        self.winners = []
 
     def create_board(self):
         continent_counter = 0
@@ -476,13 +477,16 @@ class Game:
             self.tilemanager.set_selected_armies(self.tilemanager.selected_armies + 1)
             self.tilemanager.movable_tiles(target_tile, self.manuevers, self.manuevers)
             self.tilemanager.set_active_tile(target_tile)
+            target_tile.continent.set_armies(self.active_player,
+                                             self.tilemanager.continent_army_count(self.active_player,
+                                                                                   target_tile.continent))
         elif target_tile.clickable:
             target_tile.add_armies(self.active_player, self.tilemanager.selected_armies)
             self.set_manuevers(self.manuevers - target_tile.move_cost)
             self.tilemanager.set_selected_armies(0)
             self.tilemanager.reset_movable_tiles(self.tiles)
             self.tilemanager.set_active_tile(None)
-        target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player,
+            target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player,
                                                                                             target_tile.continent))
 
     def sail_armies(self, target_tile):
@@ -492,13 +496,18 @@ class Game:
             self.tilemanager.set_selected_armies(self.tilemanager.selected_armies + 1)
             self.tilemanager.sailable_tiles(target_tile, self.manuevers, self.manuevers)
             self.tilemanager.set_active_tile(target_tile)
+            target_tile.continent.set_armies(self.active_player,
+                                             self.tilemanager.continent_army_count(self.active_player,
+                                                                                   target_tile.continent))
         elif target_tile.clickable:
             target_tile.add_armies(self.active_player, self.tilemanager.selected_armies)
             self.set_manuevers(self.manuevers - target_tile.move_cost)
             self.tilemanager.set_selected_armies(0)
             self.tilemanager.reset_movable_tiles(self.tiles)
             self.tilemanager.set_active_tile(None)
-        target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player, target_tile.continent))
+            target_tile.continent.set_armies(self.active_player,
+                                             self.tilemanager.continent_army_count(self.active_player,
+                                                                                   target_tile.continent))
 
     def clickloop(self):
         #self.display_tile_info()
@@ -536,6 +545,7 @@ class Game:
             if self.active_player == 0:
                 self.phase = Phases.EndGame
                 self.endgame_handler()
+                print(self.winners)
             elif "Joker" in self.players[self.active_player].goods:
                 self.set_manuevers(self.players[self.active_player].goods["Joker"])
             else:
@@ -562,8 +572,6 @@ class Game:
                     else:
                         self.set_manuevers(0)
                     self.phase = Phases.JokerAssignment
-            elif self.active_player == len(self.players)-1 and self.turn == self.max_turns:
-                self.endgame_handler()
             if self.graphic_manager:
                 self.graphic_manager.prepare_side_menu_elements()
         self.thorough_counting()
@@ -611,31 +619,30 @@ class Game:
                             player.score += 2
 
     def endgame_handler(self):
-        winners = []
         top_score = self.players[0].score
         for player in self.players:
             if player.score > top_score:
                 top_score = player.score
         for player in self.players:
             if player.score == top_score:
-                winners.append(player)
-        if len(winners) > 1:
-            top_coins = winners[0].score
-            for player in winners:
+                self.winners.append(player)
+        if len(self.winners) > 1:
+            top_coins = self.winners[0].score
+            for player in self.winners:
                 if player.coins > top_coins:
                     top_coins = player.coins
-            for player in winners:
+            for player in self.winners:
                 if player.coins < top_coins:
-                    winners.remove(player)
-        if len(winners) > 1:
-            top_armies = winners[0].armies
-            for player in winners:
+                    self.winners.remove(player)
+        if len(self.winners) > 1:
+            top_armies = self.winners[0].armies
+            for player in self.winners:
                 if player.coins > top_armies:
                     top_armies = player.armies
-            for player in winners:
+            for player in self.winners:
                 if player.armies < top_armies:
-                    winners.remove(player)
-        return winners
+                    self.winners.remove(player)
+        return self.winners
 
     def prepare_deck_cards(self):
         self.deck_cards += self.deck.default_deck
@@ -807,7 +814,7 @@ class Card_Button(Clickable_Element):
     def draw(self):
         ability_descriptions = [ability.ability_description for ability in self.card.abilities]
         abilities_text = ' AND '.join(ability_descriptions) if not self.card.isor else ' OR '.join(ability_descriptions)
-        card_text = f"Cost {self.card.cost}:{self.card.good}({self.card.quantity}): {abilities_text}"
+        card_text = f"Cost {self.card.cost}: {self.card.quantity}x {self.card.good} - {abilities_text}"
 
         text_surface = self.font.render(card_text, True, self.graphic_manager.colors[self.text_color])
         self.rect = text_surface.get_rect(x=self.graphic_manager.side_menu_x, y=self.y)
@@ -887,14 +894,27 @@ class Side_Menu_Title:
         self.font = pygame.font.Font(None, 24)
 
     def draw(self):
-        player_color = self.graphic_manager.game.players[self.graphic_manager.game.active_player].color
-        player_name = self.graphic_manager.game.players[self.graphic_manager.game.active_player].name
-        player_coins = self.graphic_manager.game.players[self.graphic_manager.game.active_player].coins
-        text = f"{player_name}:({player_coins}):Turn {self.graphic_manager.game.turn}:{self.graphic_manager.game.phase.name}"
-        if self.graphic_manager.game.manuevers > 0:
-            text +=f" {self.graphic_manager.game.manuevers}"
-            if self.graphic_manager.game.phase == Phases.DestroyArmy:
-                text +=f" (Target: {self.graphic_manager.game.target_player.name})"
+        winners = self.graphic_manager.game.winners
+        if self.graphic_manager.game.phase == Phases.EndGame:
+            if len(winners) > 1:
+                text = f"DRAW!"
+                for winner in winners:
+                    text += f" {winner.name}"
+                player_color = "text_default"
+            else:
+                text = f"WINNER: {winners[0].name}"
+                player_color = self.graphic_manager.game.winners[0].color
+        else:
+            player_color = self.graphic_manager.game.players[self.graphic_manager.game.active_player].color
+            player_name = self.graphic_manager.game.players[self.graphic_manager.game.active_player].name
+            player_coins = self.graphic_manager.game.players[self.graphic_manager.game.active_player].coins
+            text = f"{player_name} - Turn {self.graphic_manager.game.turn} - {self.graphic_manager.game.phase.name}"
+            if self.graphic_manager.game.phase == Phases.PickCard:
+                text += f" - {player_coins} Coins"
+            elif self.graphic_manager.game.manuevers > 0:
+                text +=f"({self.graphic_manager.game.manuevers})"
+                if self.graphic_manager.game.phase == Phases.DestroyArmy:
+                    text +=f" (Target {self.graphic_manager.game.target_player.name})"
         text_surface = self.font.render(text, True, self.graphic_manager.colors[player_color])
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.side_menu_x, self.y))
 
@@ -907,15 +927,15 @@ class Player_List_Element:
         self.font = pygame.font.Font(None, 24)
 
     def draw(self):
-        text = f"{self.player.name}:({self.player.coins}):({self.player.armies} Armies"
+        text = f"{self.player.name} ({self.player.coins} Coins) ({self.player.armies} Armies"
         if self.player.armies == self.graphic_manager.game.max_armies:
             text += " MAX!"
-        text += f"):({self.player.cities} Cities"
+        text += f") ({self.player.cities} Cities"
         if self.player.cities == self.graphic_manager.game.max_cities:
             text += " MAX!"
-        text +=f") ({self.player.score} Score)"
+        text +=f") ({self.player.score} Score) "
         for good in self.player.goods:
-            text += " " + str(self.player.goods[good]) + " " + good
+            text += str(self.player.goods[good]) + "x" + good + "; "
             
         text_surface = self.font.render(text, True, self.graphic_manager.colors[self.player.color])
         self.graphic_manager.screen.blit(text_surface, (self.graphic_manager.player_list_x, self.y))
