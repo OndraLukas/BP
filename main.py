@@ -27,6 +27,8 @@ STARTING_ARMIES = 3
 MAX_ARMIES = 14
 MAX_CITIES = 3
 
+AI_ACTION_EVENT = pygame.USEREVENT + 1
+
 
 class Phases(Enum):
     PickCard = 1
@@ -47,7 +49,7 @@ class Deck:
         self.bonus_deck = bonus_deck
 
 class Good:
-    def __init__(self,name,score):
+    def __init__(self, name, score):
         self.name = name
         self.score1 = score[0]
         self.score2 = score[1]
@@ -274,9 +276,8 @@ class Game:
         self.phase = Phases.PickCard
         self.tilemanager = tilemanager
         self.manuevers = 0
-        self.abilities_to_select = {}
+        #self.abilities_to_select = {}
         self.turn = 1
-        self.graphic_manager = None
         self.set_player_coins()
         self.target_player = None
         self.deck = deck
@@ -509,35 +510,32 @@ class Game:
                                              self.tilemanager.continent_army_count(self.active_player,
                                                                                    target_tile.continent))
 
-    def clickloop(self):
+    def clickloop(self, clicked_element):
         #self.display_tile_info()
-        if self.graphic_manager.clicked_element:
-            clicked_element = self.graphic_manager.clicked_element
-            if isinstance(clicked_element, Card) and self.phase == Phases.PickCard and clicked_element.cost <= self.players[self.active_player].coins:
-                self.play_card(self.graphic_manager.clicked_element)
-            elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityAND:
-                self.pick_ability(clicked_element)
-                self.viable_abilities.remove(clicked_element)
-            elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityOR:
-                self.pick_ability(clicked_element)
-                self.viable_abilities = []
-            elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildArmy:
-                self.build_armies(clicked_element)
-            elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildCity:
-                self.build_cities(clicked_element)
-            elif isinstance(clicked_element, Tile) and self.phase == Phases.MoveArmy:    
-                self.move_armies(clicked_element)                                        
-            elif isinstance(clicked_element, Tile) and self.phase == Phases.DestroyArmy:
-                self.destroy_armies(clicked_element)
-            elif isinstance(clicked_element, Player) and self.phase == Phases.DestroyArmy:
-                self.target_player = clicked_element
-            elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
-                self.sail_armies(clicked_element)
-            elif isinstance(clicked_element, Good) and self.phase == Phases.JokerAssignment and self.manuevers > 0:
-                self.add_good(clicked_element, 1)
-                self.set_manuevers(self.manuevers-1)
+        if isinstance(clicked_element, Card) and self.phase == Phases.PickCard and clicked_element.cost <= self.players[self.active_player].coins:
+            self.play_card(clicked_element)
+        elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityAND:
+            self.pick_ability(clicked_element)
+            self.viable_abilities.remove(clicked_element)
+        elif isinstance(clicked_element, Ability) and self.phase == Phases.PickAbilityOR:
+            self.pick_ability(clicked_element)
+            self.viable_abilities = []
+        elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildArmy:
+            self.build_armies(clicked_element)
+        elif isinstance(clicked_element, Tile) and self.phase == Phases.BuildCity:
+            self.build_cities(clicked_element)
+        elif isinstance(clicked_element, Tile) and self.phase == Phases.MoveArmy:
+            self.move_armies(clicked_element)
+        elif isinstance(clicked_element, Tile) and self.phase == Phases.DestroyArmy:
+            self.destroy_armies(clicked_element)
+        elif isinstance(clicked_element, Player) and self.phase == Phases.DestroyArmy:
+            self.target_player = clicked_element
+        elif isinstance(clicked_element, Tile) and self.phase == Phases.SailArmy:
+            self.sail_armies(clicked_element)
+        elif isinstance(clicked_element, Good) and self.phase == Phases.JokerAssignment and self.manuevers > 0:
+            self.add_good(clicked_element, 1)
+            self.set_manuevers(self.manuevers-1)
         self.scoring_handler()
-        self.graphic_manager.prepare_side_menu_elements()
 
     def end_move_handler(self):
         if self.phase == Phases.JokerAssignment:
@@ -572,11 +570,8 @@ class Game:
                     else:
                         self.set_manuevers(0)
                     self.phase = Phases.JokerAssignment
-            if self.graphic_manager:
-                self.graphic_manager.prepare_side_menu_elements()
         self.thorough_counting()
         self.scoring_handler()
-
 
     def score_tile_or_continent(self, tile_or_continet):
         top_player_index = 0
@@ -619,29 +614,22 @@ class Game:
                             player.score += 2
 
     def endgame_handler(self):
-        top_score = self.players[0].score
-        for player in self.players:
-            if player.score > top_score:
-                top_score = player.score
-        for player in self.players:
-            if player.score == top_score:
-                self.winners.append(player)
+        # Determining the player(s) with the top score
+        top_score = max(player.score for player in self.players)
+        self.winners = [player for player in self.players if player.score == top_score]
+
+        # If there's a tie on score, check for top coins
         if len(self.winners) > 1:
-            top_coins = self.winners[0].score
-            for player in self.winners:
-                if player.coins > top_coins:
-                    top_coins = player.coins
-            for player in self.winners:
-                if player.coins < top_coins:
-                    self.winners.remove(player)
+            top_coins = max(player.coins for player in self.winners)
+            # Retain only the players with the top coins count among the tied players
+            self.winners = [player for player in self.winners if player.coins == top_coins]
+
+        # If there's still a tie, check for top armies
         if len(self.winners) > 1:
-            top_armies = self.winners[0].armies
-            for player in self.winners:
-                if player.coins > top_armies:
-                    top_armies = player.armies
-            for player in self.winners:
-                if player.armies < top_armies:
-                    self.winners.remove(player)
+            top_armies = max(player.armies for player in self.winners)
+            # Retain only the players with the top armies count among the tied players
+            self.winners = [player for player in self.winners if player.armies == top_armies]
+
         return self.winners
 
     def prepare_deck_cards(self):
@@ -654,6 +642,132 @@ class Game:
         self.active_cards.append(drawn_card)
         self.deck_cards.remove(drawn_card)
 
+class AI_manager:
+    def __init__(self):
+        self.real_options = []
+        self.sim_options = []
+        self.instruction = []
+
+    def pass_instruction(self):
+        instruction = self.instruction[0]
+        self.instruction.pop(0)
+        return instruction
+
+    def create_options(self, used_game):
+        options = []
+        phase = used_game.phase
+        active_player = used_game.players[used_game.active_player]
+        if phase == Phases.PickCard:
+            options = self.CardOptions(used_game)
+        elif phase == Phases.PickAbilityOR or phase == Phases.PickAbilityAND:
+            options = used_game.viable_abilities
+        elif phase == Phases.BuildArmy and used_game.manuevers and active_player.armies < used_game.max_armies:
+            options = self.ArmyBuildingOptions(used_game)
+        elif phase == Phases.BuildCity and used_game.manuevers and active_player.cities < used_game.max_cities:
+            options = self.CityBuildingOptions(used_game)
+        elif (phase == Phases.MoveArmy or phase == Phases.SailArmy) and used_game.manuevers:
+            options = self.MovingOptions(used_game)
+        elif phase == Phases.DestroyArmy and used_game.manuevers:
+            options = self.DestroyOptions(used_game)
+        elif phase == Phases.JokerAssignment and used_game.manuevers:
+            options = used_game.deck.goods
+            print("test5")
+        else:
+            options.append(None)
+            #print("test6")
+        return options
+
+    def CardOptions(self, used_game):
+        options = []
+        active_player = used_game.players[used_game.active_player]
+
+        for card in used_game.active_cards:
+            if card.cost <= active_player.coins:
+                options.append(card)
+
+        return options
+
+    def ArmyBuildingOptions(self, used_game):
+        options = []
+        for row in used_game.tiles:
+            for tile in row:
+                if tile.cities[used_game.active_player] > 0 or tile.is_starting_tile:
+                    options.append(tile)
+        #options.append(None)
+        return options
+
+    def CityBuildingOptions(self, used_game):
+        options = []
+        for row in used_game.tiles:
+            for tile in row:
+                if tile.armies[used_game.active_player] > 0:
+                    options.append(tile)
+        #options.append(None)
+        return options
+
+    def MovingOptions(self, used_game):
+        options = []
+        for row in used_game.tiles:
+            for tile in row:
+                if tile.armies[used_game.active_player] > 0:
+                    for neighbour in tile.neighbours:
+                        if neighbour.tile_type == "ground":
+                            options.append([tile, neighbour])
+                        elif used_game.phase == Phases.SailArmy and neighbour.tile_type == "water":
+                            for water_neighbour in neighbour.neighbours:
+                                if water_neighbour.tile_type == "ground" and water_neighbour != tile:
+                                    options.append([tile, water_neighbour])
+        options.append(None)
+        return options
+
+    def DestroyOptions(self, used_game):
+        options = []
+        players = used_game.players.copy()
+        players.pop(used_game.active_player)
+        for player in players:
+            for row in used_game.tiles:
+                for tile in row:
+                    if tile.armies[players.index(player)] > 0:
+                        options.append([player, tile])
+        options.append(None)
+        return options
+
+    def pick_instruction(self, options):
+        if isinstance(options, dict):
+            keys = list(options.keys())
+            random_key = random.choice(keys)
+            instruction = options[random_key]
+        else:
+            instruction = random.choice(options)
+        return instruction
+
+    def AI_loop(self, thegame):
+        if len(self.instruction) < 1:
+            self.real_options = self.create_options(thegame)
+            print("OPTIONS")
+            print(self.real_options)
+            instruction = self.pick_instruction(self.real_options)
+            if isinstance(instruction, list):
+                self.instruction = instruction
+            else:
+                self.instruction.append(instruction)
+            print("INSTRUCTION")
+            print(self.instruction)
+        elif self.instruction[0] == None:
+                thegame.end_move_handler()
+                self.pass_instruction()
+                print(self.instruction)
+        else:
+            thegame.clickloop(self.pass_instruction())
+            print("OPTIONS")
+            print(self.real_options)
+            print("INSTRUCTION")
+            print(self.instruction)
+
+
+
+
+
 
 #Graphics
 class GraphicManager:
@@ -663,7 +777,6 @@ class GraphicManager:
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)
         self.colors = colors
         self.game = game
-        self.game.graphic_manager = self
         self.tile_margin = 5
         self.tile_size = 100
         self.tile_graphics = []
@@ -683,7 +796,6 @@ class GraphicManager:
         self.prepare_side_menu_elements()
         self.prepare_player_list()
         self.good_list = Good_Scoring(self.game.deck.goods, self)
-        self.clicked_element = None
         self.mouse_pos = pygame.mouse.get_pos()
         self.clicked_pos = None
 
@@ -749,11 +861,7 @@ class GraphicManager:
         clickable_elements = self.side_menu_elements + [tile_graphic for row in self.tile_graphics for tile_graphic in row]
         for element in clickable_elements:
             if isinstance(element, Clickable_Element) and element.clicked():
-                self.clicked_element = getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None) or getattr(element,'player',None) or getattr(element,'good',None)
-                break
-
-    def reset_clicked_element(self):
-        self.clicked_element = None
+                return getattr(element, 'card', None) or getattr(element, 'tile', None) or getattr(element, 'ability', None) or getattr(element,'player',None) or getattr(element,'good',None)
 
 class Clickable_Element:
     def __init__(self, graphic_manager):
@@ -908,7 +1016,7 @@ class Side_Menu_Title:
             player_color = self.graphic_manager.game.players[self.graphic_manager.game.active_player].color
             player_name = self.graphic_manager.game.players[self.graphic_manager.game.active_player].name
             player_coins = self.graphic_manager.game.players[self.graphic_manager.game.active_player].coins
-            text = f"{player_name} - Turn {self.graphic_manager.game.turn} - {self.graphic_manager.game.phase.name}"
+            text = f"{player_name} - Turn {self.graphic_manager.game.turn}/{self.graphic_manager.game.max_turns} - {self.graphic_manager.game.phase.name}"
             if self.graphic_manager.game.phase == Phases.PickCard:
                 text += f" - {player_coins} Coins"
             elif self.graphic_manager.game.manuevers > 0:
@@ -927,13 +1035,7 @@ class Player_List_Element:
         self.font = pygame.font.Font(None, 24)
 
     def draw(self):
-        text = f"{self.player.name} ({self.player.coins} Coins) ({self.player.armies} Armies"
-        if self.player.armies == self.graphic_manager.game.max_armies:
-            text += " MAX!"
-        text += f") ({self.player.cities} Cities"
-        if self.player.cities == self.graphic_manager.game.max_cities:
-            text += " MAX!"
-        text +=f") ({self.player.score} Score) "
+        text = f"{self.player.name} ({self.player.coins} Coins) ({self.player.armies}/{self.graphic_manager.game.max_armies} Armies) ({self.player.cities}/{self.graphic_manager.game.max_cities} Cities) ({self.player.score} Score) "
         for good in self.player.goods:
             text += str(self.player.goods[good]) + "x" + good + "; "
             
@@ -976,8 +1078,9 @@ board_layout = [
 ]
 
 players = []
-players.append(Player("Player 1",False,"player_red"))
-players.append(Player("Player 2",False,"player_green"))
+players.append(Player("AI1",True,"player_red"))
+players.append(Player("AI2",True,"player_blue"))
+players.append(Player("AI3",True,"player_green"))
 random.shuffle(players)
 
 defualtcards = []
@@ -1063,25 +1166,36 @@ defualtcards.append(Card([ABILITIES["sail2"]], "Joker", 1, False))
 
 TheTileManager = TileManager()
 
+TheAIManager = AI_manager()
 TheDeck = Deck(default_goods, defualtcards, bonuscards)
 TheGame = Game(TheDeck, board_layout, players, TheTileManager, STARTING_ARMIES, MAX_ARMIES, MAX_CITIES)
 TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
 TheGame.display_tile_info()
 
+if TheGame.players[TheGame.active_player].AI:
+    pygame.time.set_timer(AI_ACTION_EVENT, 1500)
+
 running = True
 while running:
+    TheGraphicManager.graphics()
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         if TheGame.phase != Phases.EndGame:
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                TheGraphicManager.click_handler()
-                TheGame.clickloop()
-                TheGraphicManager.reset_clicked_element()
-            elif event.type == pygame.KEYDOWN:
+            if event.type == AI_ACTION_EVENT and TheGame.players[TheGame.active_player].AI:
+                TheAIManager.AI_loop(TheGame)
+                TheGraphicManager.prepare_side_menu_elements()
+            elif event.type == pygame.MOUSEBUTTONDOWN and TheGame.players[TheGame.active_player].AI == False:
+                TheGame.clickloop(TheGraphicManager.click_handler())
+                TheGraphicManager.prepare_side_menu_elements()
+            elif event.type == pygame.KEYDOWN and TheGame.players[TheGame.active_player].AI == False:
                 if event.key == pygame.K_SPACE:
                     TheGame.end_move_handler()
-    TheGraphicManager.graphics()
+                    TheGraphicManager.prepare_side_menu_elements()
+            if TheGame.players[TheGame.active_player].AI:
+                pygame.time.set_timer(AI_ACTION_EVENT, 500)
+            else:
+                pygame.time.set_timer(AI_ACTION_EVENT, 0)
 
 # Quit Pygame
 pygame.quit()
