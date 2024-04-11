@@ -3,10 +3,17 @@ from enum import Enum
 import pygame
 import sys
 import math
+import copy
 
 # Initialize Pygame
 pygame.init()
 pygame.font.init()
+
+def debug_check(game_object, context):
+    print(f"Debug Check in {context}:")
+    for player in game_object.players:
+        print(f"Player {player} armies: {player.armies}")
+    game_object.display_tile_info()
 
 #Globální proměnné
 SCREEN_WIDTH = 1024
@@ -116,8 +123,10 @@ class Continent:
         self.cities[player_index] = number
 
 class Tile:
-    def __init__(self, tile_id, tile_type):
-        self.tile_id = tile_id
+    def __init__(self, tile_x, tile_y, tile_type):
+        self.tile_x = tile_x
+        self.tile_y = tile_y
+        self.tile_id = f"T{self.tile_x}_{self.tile_y}"
         self.continent = None
         self.tile_type = tile_type
         self.armies = [0, 0, 0, 0, 0]
@@ -126,6 +135,16 @@ class Tile:
         self.is_starting_tile = False
         self.clickable = False
         self.move_cost = -1
+
+    def __deepcopy__(self, memo):
+        new_copy = Tile(self.tile_x, self.tile_y, self.tile_type)
+        new_copy.armies = copy.deepcopy(self.armies, memo)
+        new_copy.cities = copy.deepcopy(self.cities, memo)
+        new_copy.is_starting_tile = self.is_starting_tile
+        new_copy.clickable = self.clickable
+        new_copy.move_cost = self.move_cost
+        new_copy.neighbours = []
+        return new_copy
 
     def make_starting_tile(self):
         self.is_starting_tile = True
@@ -252,6 +271,12 @@ class Player:
         self.coins = 0
         self.score = 0
 
+    def set_armies(self, number):
+        self.armies = number
+
+    def set_cities(self, number):
+        self.cities = number
+
     def spend_coins(self, number):
         self.coins -= number
 
@@ -271,68 +296,101 @@ class Game:
         self.played_card = None
         self.continents = {}
         self.board_layout = layout
-        self.create_board()
-        self.set_up_starting_armies(starting_armies)
-        self.phase = Phases.PickCard
+        self.phase = None
         self.tilemanager = tilemanager
         self.manuevers = 0
-        #self.abilities_to_select = {}
         self.turn = 1
-        self.set_player_coins()
         self.target_player = None
         self.deck = deck
         self.deck_cards = []
-        self.prepare_deck_cards()
         self.max_turns = 0
+        self.winners = []
+        self.starting_armies = starting_armies
+
+    def __deepcopy__(self, memo):
+        # Create a new instance without calling __init__
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+        memo[id(self)] = new_obj
+
+        # Copy all attributes but skip 'continents'
+        for k, v in self.__dict__.items():
+            if k == 'continents':  # Skip copying 'continents'
+                setattr(new_obj, k, None)  # Set to None or an appropriate default value
+            else:
+                setattr(new_obj, k, copy.deepcopy(v, memo))
+
+        return new_obj
+
+    def initialize_game(self):
+        self.create_board()
+        self.set_up_starting_armies(self.starting_armies)
+        self.phase = Phases.PickCard
+        self.set_player_coins()
+        self.prepare_deck_cards()
         self.set_max_turns()
         while len(self.active_cards) < 6:
             self.draw_card()
         self.set_cards_cost()
         self.thorough_counting()
-        self.winners = []
+
+    def clone_game(self):
+        cloned_game = copy.deepcopy(self)
+
+        cloned_game.continents = {}
+        cloned_game.add_neighbors(cloned_game.tiles)
+
+        continent_counter = 0
+        for row in cloned_game.tiles:
+            for tile in row:
+                continent_counter = cloned_game.assign_to_continent(tile, cloned_game.continents, cloned_game.tiles, continent_counter)
+
+        cloned_game.thorough_counting()
+        return cloned_game
+
+
+    def add_neighbors(self, tiles):
+        for i in range(len(tiles)):
+            for j in range(len(tiles[i])):
+                tile = tiles[i][j]
+                if i > 0: tile.add_neighbour(tiles[i - 1][j])
+                if i < len(tiles) - 1: tile.add_neighbour(tiles[i + 1][j])
+                if j > 0: tile.add_neighbour(tiles[i][j - 1])
+                if j < len(tiles[i]) - 1: tile.add_neighbour(tiles[i][j + 1])
+
+    def assign_to_continent(self, tile, continents, tiles, continent_counter):
+        if tile.tile_type == 'ground' and tile.continent is None:
+            continent_counter += 1
+            continent = Continent(f"C{continent_counter}", f"Continent{continent_counter}")
+            continents[continent.continent_id] = continent
+            self.explore_and_assign(tile, continent, tiles)
+        return continent_counter
+
+    def explore_and_assign(self, tile, continent, tiles):
+        if tile.tile_type == 'ground' and tile.continent is None:
+            continent.add_tile(tile)
+            for neighbour in tile.neighbours:
+                self.explore_and_assign(neighbour, continent, tiles)
 
     def create_board(self):
+        self.tiles = []
         continent_counter = 0
 
         for row_index, row in enumerate(self.board_layout):
             tile_row = []
             for col_index, col in enumerate(row):
                 tile_type = 'water' if col == 'W' else 'ground'
-                tile_id = f"T{row_index}_{col_index}"
-                tile = Tile(tile_id, tile_type)
+                tile = Tile(row_index, col_index, tile_type)
                 if col == 'S':
                     tile.make_starting_tile()
                 tile_row.append(tile)
             self.tiles.append(tile_row)
 
-        def add_neighbors():
-            for i in range(len(self.tiles)):
-                for j in range(len(self.tiles[i])):
-                    tile = self.tiles[i][j]
-                    if i > 0: tile.add_neighbour(self.tiles[i - 1][j])
-                    if i < len(self.tiles) - 1: tile.add_neighbour(self.tiles[i + 1][j])
-                    if j > 0: tile.add_neighbour(self.tiles[i][j - 1])
-                    if j < len(self.tiles[i]) - 1: tile.add_neighbour(self.tiles[i][j + 1])
-
-        add_neighbors()
-
-        def assign_to_continent(tile):
-            nonlocal continent_counter
-            if tile.tile_type == 'ground' and tile.continent is None:
-                continent_counter += 1
-                continent = Continent(f"C{continent_counter}", f"Continent{continent_counter}")
-                self.continents[continent.continent_id] = continent
-                explore_and_assign(tile, continent)
-
-        def explore_and_assign(tile, continent):
-            if tile.tile_type == 'ground' and tile.continent is None:
-                continent.add_tile(tile)
-                for neighbour in tile.neighbours:
-                    explore_and_assign(neighbour, continent)
+        self.add_neighbors(self.tiles)
 
         for row in self.tiles:
             for tile in row:
-                assign_to_continent(tile)
+                continent_counter = self.assign_to_continent(tile, self.continents, self.tiles, continent_counter)
 
     def display_tile_info(self):
         for row in self.tiles:
@@ -453,21 +511,21 @@ class Game:
         player_index = self.players.index(self.target_player)
         if target_tile.armies[player_index] > 0 and self.manuevers > 0:
             target_tile.remove_army(player_index)
-            players[player_index].armies = self.tilemanager.count_armies(player_index, self.tiles)
+            self.players[player_index].armies = self.tilemanager.count_armies(player_index, self.tiles)
             target_tile.continent.set_armies(player_index, self.tilemanager.continent_army_count(player_index, target_tile.continent))
             self.set_manuevers(self.manuevers - 1)
 
     def build_armies(self, target_tile):
         if (target_tile.is_starting_tile or target_tile.cities[self.active_player] > 0) and self.players[self.active_player].armies < self.max_armies and self.manuevers > 0:
             target_tile.add_army(self.active_player)
-            players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
+            self.players[self.active_player].armies = self.tilemanager.count_armies(self.active_player, self.tiles)
             target_tile.continent.set_armies(self.active_player, self.tilemanager.continent_army_count(self.active_player, target_tile.continent))
             self.set_manuevers(self.manuevers - 1)
 
     def build_cities(self, target_tile):
         if target_tile.armies[self.active_player] > 0 and self.players[self.active_player].cities < self.max_cities and self.manuevers > 0:
             target_tile.add_city(self.active_player)
-            players[self.active_player].cities = self.tilemanager.count_cities(self.active_player, self.tiles)
+            self.players[self.active_player].cities = self.tilemanager.count_cities(self.active_player, self.tiles)
             target_tile.continent.set_cities(self.active_player, self.tilemanager.continent_city_count(self.active_player, target_tile.continent))
             self.set_manuevers(self.manuevers-1)
 
@@ -543,7 +601,7 @@ class Game:
             if self.active_player == 0:
                 self.phase = Phases.EndGame
                 self.endgame_handler()
-                print(self.winners)
+                #print(self.winners)
             elif "Joker" in self.players[self.active_player].goods:
                 self.set_manuevers(self.players[self.active_player].goods["Joker"])
             else:
@@ -551,7 +609,7 @@ class Game:
         elif self.phase != Phases.PickCard:
             self.set_manuevers(0)
             self.tilemanager.reset_armies(self.active_player)
-            self.tilemanager.count_armies(self.active_player, self.tiles)
+            #self.tilemanager.count_armies(self.active_player, self.tiles)
             self.tilemanager.reset_movable_tiles(self.tiles)
             if self.phase == Phases.PickAbilityOR or self.phase == Phases.PickAbilityAND:
                 self.viable_abilities = []
@@ -643,14 +701,22 @@ class Game:
         self.deck_cards.remove(drawn_card)
 
 class AI_manager:
-    def __init__(self):
+    def __init__(self, sim_length):
         self.real_options = []
         self.sim_options = []
-        self.instruction = []
+        self.sim_instruction = []
+        self.real_instruction = []
+        self.weights = []
+        self.sim_length = sim_length
 
-    def pass_instruction(self):
-        instruction = self.instruction[0]
-        self.instruction.pop(0)
+    def pass_real_instruction(self):
+        instruction = self.real_instruction[0]
+        self.real_instruction.pop(0)
+        return instruction
+
+    def pass_sim_instruction(self):
+        instruction = self.sim_instruction[0]
+        self.sim_instruction.pop(0)
         return instruction
 
     def create_options(self, used_game):
@@ -670,11 +736,9 @@ class AI_manager:
         elif phase == Phases.DestroyArmy and used_game.manuevers:
             options = self.DestroyOptions(used_game)
         elif phase == Phases.JokerAssignment and used_game.manuevers:
-            options = used_game.deck.goods
-            print("test5")
+            options = list(used_game.deck.goods.values())
         else:
             options.append(None)
-            #print("test6")
         return options
 
     def CardOptions(self, used_game):
@@ -732,7 +796,7 @@ class AI_manager:
         options.append(None)
         return options
 
-    def pick_instruction(self, options):
+    def pick_random_instruction(self, options):
         if isinstance(options, dict):
             keys = list(options.keys())
             random_key = random.choice(keys)
@@ -741,33 +805,85 @@ class AI_manager:
             instruction = random.choice(options)
         return instruction
 
-    def AI_loop(self, thegame):
-        if len(self.instruction) < 1:
-            self.real_options = self.create_options(thegame)
-            print("OPTIONS")
-            print(self.real_options)
-            instruction = self.pick_instruction(self.real_options)
-            if isinstance(instruction, list):
-                self.instruction = instruction
-            else:
-                self.instruction.append(instruction)
-            print("INSTRUCTION")
-            print(self.instruction)
-        elif self.instruction[0] == None:
-                thegame.end_move_handler()
-                self.pass_instruction()
-                print(self.instruction)
+    def pick_best_instruction(self, options, weights):
+        if isinstance(options, dict):
+            keys = list(options.keys())
+            random_key = random.choice(keys)
+            instruction = options[random_key]
         else:
-            thegame.clickloop(self.pass_instruction())
+            return options[weights.index(max(weights))]
+        return instruction
+
+    def AI_loop(self, thegame):
+        if len(self.real_instruction) < 1:
+            self.real_options = self.create_options(thegame)
+            print(thegame.phase)
+            print("OPTIONS")
+            print(self.real_options)
+            self.weights = []
+            print(self.weights)
+            for i in range(len(self.real_options)):
+                self.weights.append(0)
+            for option in self.real_options:
+                for i in range(self.sim_length):
+                    self.weights[self.real_options.index(option)] += self.SimulateGame(thegame, option)
+            instruction = self.pick_best_instruction(self.real_options, self.weights)
+            if isinstance(instruction, list):
+                self.real_instruction = instruction
+            else:
+                self.real_instruction.append(instruction)
+            print("INSTRUCTION")
+            print(self.weights)
+            print(self.real_instruction)
+        elif self.real_instruction[0] == None:
+                thegame.end_move_handler()
+                self.pass_real_instruction()
+                print(self.real_instruction)
+        else:
+            thegame.clickloop(self.pass_real_instruction())
             print("OPTIONS")
             print(self.real_options)
             print("INSTRUCTION")
-            print(self.instruction)
+            print(self.real_instruction)
 
+    def SimulateGame(self, thegame, initial_instruction):
+        sim = thegame.clone_game()
+        actual_initial_instruction = []
+        if isinstance(initial_instruction, Card):
+            actual_initial_instruction.append(sim.active_cards[thegame.active_cards.index(initial_instruction)])
+        elif isinstance(initial_instruction, list) and thegame.phase == Phases.DestroyArmy:
+            actual_initial_instruction.append(initial_instruction[0])
+            actual_initial_instruction.append(sim.tiles[initial_instruction[1].tile_x][initial_instruction[1].tile_y])
+        elif isinstance(initial_instruction, list):
+            actual_initial_instruction.append(sim.tiles[initial_instruction[0].tile_x][initial_instruction[0].tile_y])
+            actual_initial_instruction.append(sim.tiles[initial_instruction[1].tile_x][initial_instruction[1].tile_y])
+        elif isinstance(initial_instruction, Tile):
+            actual_initial_instruction.append(sim.tiles[initial_instruction.tile_x][initial_instruction.tile_y])
+        else:
+            actual_initial_instruction.append(initial_instruction)
 
+        self.sim_instruction = actual_initial_instruction
+        print(f"SIM_LOOP: {actual_initial_instruction}")
 
-
-
+        while sim.phase != Phases.EndGame:
+            if len(self.sim_instruction) < 1:
+                self.sim_options = self.create_options(sim)
+                instruction = self.pick_random_instruction(self.sim_options)
+                if isinstance(instruction, list):
+                    self.sim_instruction = instruction
+                else:
+                    self.sim_instruction.append(instruction)
+            elif self.sim_instruction[0] == None:
+                sim.end_move_handler()
+                self.pass_sim_instruction()
+            else:
+                sim.clickloop(self.pass_sim_instruction())
+        if sim.players[thegame.active_player] not in sim.winners:
+            return 0
+        elif len(sim.winners) == 1:
+            return 2 * sim.players[thegame.active_player].score
+        else:
+            return 1 * sim.players[thegame.active_player].score
 
 #Graphics
 class GraphicManager:
@@ -1078,9 +1194,8 @@ board_layout = [
 ]
 
 players = []
-players.append(Player("AI1",True,"player_red"))
+players.append(Player("Player",False,"player_red"))
 players.append(Player("AI2",True,"player_blue"))
-players.append(Player("AI3",True,"player_green"))
 random.shuffle(players)
 
 defualtcards = []
@@ -1166,11 +1281,12 @@ defualtcards.append(Card([ABILITIES["sail2"]], "Joker", 1, False))
 
 TheTileManager = TileManager()
 
-TheAIManager = AI_manager()
+TheAIManager = AI_manager(200)
 TheDeck = Deck(default_goods, defualtcards, bonuscards)
 TheGame = Game(TheDeck, board_layout, players, TheTileManager, STARTING_ARMIES, MAX_ARMIES, MAX_CITIES)
+TheGame.initialize_game()
 TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
-TheGame.display_tile_info()
+#TheGame.display_tile_info()
 
 if TheGame.players[TheGame.active_player].AI:
     pygame.time.set_timer(AI_ACTION_EVENT, 1500)
