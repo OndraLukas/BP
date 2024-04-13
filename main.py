@@ -313,10 +313,12 @@ class Game:
         new_obj = cls.__new__(cls)
         memo[id(self)] = new_obj
 
-        # Copy all attributes but skip 'continents'
+        # Copy all attributes but skip 'continents' and treat 'viable_abilities' differently
         for k, v in self.__dict__.items():
             if k == 'continents':  # Skip copying 'continents'
                 setattr(new_obj, k, None)  # Set to None or an appropriate default value
+            elif k == 'viable_abilities':  # Shallow copy of 'viable_abilities'
+                setattr(new_obj, k, list(v))  # Copy the list structure, not the contents
             else:
                 setattr(new_obj, k, copy.deepcopy(v, memo))
 
@@ -411,7 +413,6 @@ class Game:
                 self.continents[continent].set_armies(player_index, self.tilemanager.continent_army_count(player_index, self.continents[continent]))
                 self.continents[continent].set_cities(player_index, self.tilemanager.continent_city_count(player_index, self.continents[continent]))
 
-
     def set_player_coins(self):
         if len(self.players) == 5:
             for player in self.players:
@@ -474,8 +475,6 @@ class Game:
             active_player.goods["Joker"] += quantity
         else:
             active_player.goods["Joker"] = quantity
-
-
 
     def pick_ability(self, picked_ability):
         self.set_manuevers(picked_ability.manuevers)
@@ -567,6 +566,8 @@ class Game:
             target_tile.continent.set_armies(self.active_player,
                                              self.tilemanager.continent_army_count(self.active_player,
                                                                                    target_tile.continent))
+    def remove_viable_ability(self, ability):
+        self.viable_abilities.remove(ability)
 
     def clickloop(self, clicked_element):
         #self.display_tile_info()
@@ -748,7 +749,7 @@ class AI_manager:
         for card in used_game.active_cards:
             if card.cost <= active_player.coins:
                 options.append(card)
-
+                #if len(card.abilities) > 1:
         return options
 
     def ArmyBuildingOptions(self, used_game):
@@ -797,6 +798,8 @@ class AI_manager:
         return options
 
     def pick_random_instruction(self, options):
+        if len(options) == 1:
+            return options[0]
         if isinstance(options, dict):
             keys = list(options.keys())
             random_key = random.choice(keys)
@@ -822,12 +825,15 @@ class AI_manager:
             print(self.real_options)
             self.weights = []
             print(self.weights)
-            for i in range(len(self.real_options)):
-                self.weights.append(0)
-            for option in self.real_options:
-                for i in range(self.sim_length):
-                    self.weights[self.real_options.index(option)] += self.SimulateGame(thegame, option)
-            instruction = self.pick_best_instruction(self.real_options, self.weights)
+            if len(self.real_options) == 1:
+                instruction = self.real_options[0]
+            else:
+                for i in range(len(self.real_options)):
+                    self.weights.append(0)
+                for option in self.real_options:
+                    for i in range(self.sim_length):
+                        self.weights[self.real_options.index(option)] += self.SimulateGame(thegame, option)
+                instruction = self.pick_best_instruction(self.real_options, self.weights)
             if isinstance(instruction, list):
                 self.real_instruction = instruction
             else:
@@ -852,7 +858,7 @@ class AI_manager:
         if isinstance(initial_instruction, Card):
             actual_initial_instruction.append(sim.active_cards[thegame.active_cards.index(initial_instruction)])
         elif isinstance(initial_instruction, list) and thegame.phase == Phases.DestroyArmy:
-            actual_initial_instruction.append(initial_instruction[0])
+            actual_initial_instruction.append(sim.players[thegame.players.index(initial_instruction[0])])
             actual_initial_instruction.append(sim.tiles[initial_instruction[1].tile_x][initial_instruction[1].tile_y])
         elif isinstance(initial_instruction, list):
             actual_initial_instruction.append(sim.tiles[initial_instruction[0].tile_x][initial_instruction[0].tile_y])
