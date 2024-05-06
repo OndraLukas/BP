@@ -4,6 +4,7 @@ import pygame
 import sys
 import math
 import copy
+import time
 
 # Initialize Pygame
 pygame.init()
@@ -16,6 +17,7 @@ def debug_check(game_object, context):
     game_object.display_tile_info()
 
 #Globální proměnné
+TIMEDATA =[]
 SCREEN_WIDTH = 1024
 SCREEN_HEIGHT = 720
 COLORS = {
@@ -105,9 +107,8 @@ class SailArmies(Ability):
         self.ability_description = "Sail Armies(" + str(self.manuevers) + ")"
 
 class Continent:
-    def __init__(self, continent_id, name):
+    def __init__(self, continent_id):
         self.continent_id = continent_id
-        self.name = name
         self.tiles = []
         self.armies = [0,0,0,0,0]
         self.cities = [0,0,0,0,0]
@@ -197,7 +198,6 @@ class TileManager:
 
     def set_selected_armies(self, number):
         self.selected_armies = number
-
 
     def reset_armies(self, player_index):
         if self.active_tile != None:
@@ -308,17 +308,15 @@ class Game:
         self.starting_armies = starting_armies
 
     def __deepcopy__(self, memo):
-        # Create a new instance without calling __init__
         cls = self.__class__
         new_obj = cls.__new__(cls)
         memo[id(self)] = new_obj
 
-        # Copy all attributes but skip 'continents' and treat 'viable_abilities' differently
         for k, v in self.__dict__.items():
-            if k == 'continents':  # Skip copying 'continents'
-                setattr(new_obj, k, None)  # Set to None or an appropriate default value
-            elif k == 'viable_abilities':  # Shallow copy of 'viable_abilities'
-                setattr(new_obj, k, list(v))  # Copy the list structure, not the contents
+            if k == 'continents':
+                setattr(new_obj, k, None)
+            elif k == 'viable_abilities':
+                setattr(new_obj, k, v.copy())
             else:
                 setattr(new_obj, k, copy.deepcopy(v, memo))
 
@@ -363,7 +361,7 @@ class Game:
     def assign_to_continent(self, tile, continents, tiles, continent_counter):
         if tile.tile_type == 'ground' and tile.continent is None:
             continent_counter += 1
-            continent = Continent(f"C{continent_counter}", f"Continent{continent_counter}")
+            continent = Continent(f"C{continent_counter}")
             continents[continent.continent_id] = continent
             self.explore_and_assign(tile, continent, tiles)
         return continent_counter
@@ -417,10 +415,10 @@ class Game:
         if len(self.players) == 5:
             for player in self.players:
                 player.set_coins(8)
-        if len(self.players) == 4:
+        elif len(self.players) == 4:
             for player in self.players:
                 player.set_coins(9)
-        if len(self.players) == 3:
+        elif len(self.players) == 3:
             for player in self.players:
                 player.set_coins(11)
         else:
@@ -430,9 +428,9 @@ class Game:
     def set_max_turns(self):
         if len(self.players) == 5:
             self.max_turns = 7
-        if len(self.players) == 4:
+        elif len(self.players) == 4:
             self.max_turns = 8
-        if len(self.players) == 3:
+        elif len(self.players) == 3:
             self.max_turns = 10
         else:
             self.max_turns = 13
@@ -614,6 +612,8 @@ class Game:
             self.tilemanager.reset_movable_tiles(self.tiles)
             if self.phase == Phases.PickAbilityOR or self.phase == Phases.PickAbilityAND:
                 self.viable_abilities = []
+            if self.phase == Phases.PickAbilityAND or self.phase == Phases.PickAbilityOR:
+                self.viable_abilities = []
             if len(self.viable_abilities) > 0:
                 self.set_phase(Phases.PickAbilityAND)
             else:
@@ -683,6 +683,17 @@ class Game:
             # Retain only the players with the top coins count among the tied players
             self.winners = [player for player in self.winners if player.coins == top_coins]
 
+        #If there's still a tie, check for top tiles controlled
+        if len(self.winners) > 1:
+            tiles_controlled = [0, 0, 0, 0, 0]
+            for row in self.tiles:
+                for tile in row:
+                    tile_scoring = self.score_tile_or_continent(tile)
+                    if tile_scoring is not None:
+                        tiles_controlled[tile_scoring] += 1
+            top_tiles_controlled = max(tiles_controlled)
+            self.winners = [player for player in self.winners if tiles_controlled[self.players.index(player)] == top_tiles_controlled]
+
         # If there's still a tie, check for top armies
         if len(self.winners) > 1:
             top_armies = max(player.armies for player in self.winners)
@@ -691,15 +702,19 @@ class Game:
 
         return self.winners
 
+
     def prepare_deck_cards(self):
         self.deck_cards += self.deck.default_deck
-        if len(players) > 5:
+        if len(players) > 4:
             self.deck_cards += self.deck.bonus_deck
 
     def draw_card(self):
-        drawn_card = random.choice(self.deck_cards)
-        self.active_cards.append(drawn_card)
-        self.deck_cards.remove(drawn_card)
+        try:
+            drawn_card = random.choice(self.deck_cards)
+            self.active_cards.append(drawn_card)
+            self.deck_cards.remove(drawn_card)
+        except:
+            print("Not enough cards")
 
 class AI_manager:
     def __init__(self, sim_length):
@@ -887,9 +902,9 @@ class AI_manager:
         if sim.players[thegame.active_player] not in sim.winners:
             return 0
         elif len(sim.winners) == 1:
-            return 2 * sim.players[thegame.active_player].score
+            return 3
         else:
-            return 1 * sim.players[thegame.active_player].score
+            return 1
 
 #Graphics
 class GraphicManager:
@@ -1191,17 +1206,22 @@ class Good_Scoring:
 
 
 #GameSetup
+print(pygame.version.ver)
+
 board_layout = [
-    "WGGWG",
-    "WGGWG",
-    "WWSWG",
-    "GWGWW",
-    "GWGWW"
+    "WGGWWG",
+    "WGGWWG",
+    "WWSWGG",
+    "GWGWWW",
+    "GWGGWG"
 ]
 
 players = []
-players.append(Player("Player",False,"player_red"))
-players.append(Player("AI2",True,"player_blue"))
+players.append(Player("Martin",False,"player_red"))
+players.append(Player("Magda",False,"player_orange"))
+players.append(Player("Ondra",False,"player_blue"))
+players.append(Player("AI1",True,"player_green"))
+players.append(Player("AI2",True,"player_yellow"))
 random.shuffle(players)
 
 defualtcards = []
@@ -1290,12 +1310,18 @@ TheTileManager = TileManager()
 TheAIManager = AI_manager(200)
 TheDeck = Deck(default_goods, defualtcards, bonuscards)
 TheGame = Game(TheDeck, board_layout, players, TheTileManager, STARTING_ARMIES, MAX_ARMIES, MAX_CITIES)
+print(TheGame.max_turns)
 TheGame.initialize_game()
+print(TheGame.max_turns)
 TheGraphicManager = GraphicManager(SCREEN_WIDTH, SCREEN_HEIGHT, COLORS, TheGame)
 #TheGame.display_tile_info()
 
+print(TheGame.max_turns)
+
 if TheGame.players[TheGame.active_player].AI:
-    pygame.time.set_timer(AI_ACTION_EVENT, 1500)
+    pygame.time.set_timer(AI_ACTION_EVENT, 500)
+
+print(TheGame.max_turns)
 
 running = True
 while running:
@@ -1305,19 +1331,28 @@ while running:
             running = False
         if TheGame.phase != Phases.EndGame:
             if event.type == AI_ACTION_EVENT and TheGame.players[TheGame.active_player].AI:
+                start = time.time()
                 TheAIManager.AI_loop(TheGame)
                 TheGraphicManager.prepare_side_menu_elements()
+                end = time.time()
+                TIMEDATA.append(end-start)
+                print(TIMEDATA)
             elif event.type == pygame.MOUSEBUTTONDOWN and TheGame.players[TheGame.active_player].AI == False:
-                TheGame.clickloop(TheGraphicManager.click_handler())
-                TheGraphicManager.prepare_side_menu_elements()
+                try:
+                    TheGame.clickloop(TheGraphicManager.click_handler())
+                    TheGraphicManager.prepare_side_menu_elements()
+                except:
+                    print("button_error")
             elif event.type == pygame.KEYDOWN and TheGame.players[TheGame.active_player].AI == False:
                 if event.key == pygame.K_SPACE:
                     TheGame.end_move_handler()
                     TheGraphicManager.prepare_side_menu_elements()
             if TheGame.players[TheGame.active_player].AI:
-                pygame.time.set_timer(AI_ACTION_EVENT, 500)
+                pygame.time.set_timer(AI_ACTION_EVENT, 100)
             else:
                 pygame.time.set_timer(AI_ACTION_EVENT, 0)
+            if TheGame.phase == Phases.EndGame:
+                print(sum(TIMEDATA))
 
 # Quit Pygame
 pygame.quit()
